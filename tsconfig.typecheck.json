@@ -1,0 +1,19 @@
+{
+  // Isolated type-check for the @o11y/local-headless conformance assertion. Uses bundler
+  // module resolution so it can reference the package's ESM-only type declarations, which
+  // the main CommonJS (module:node16) build cannot. Emits nothing; asserts types only.
+  "compilerOptions": {
+    "target": "ES2020",
+    "lib": ["es2022", "dom"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+    "strict": true,
+    "noImplicitAny": true,
+    "noUnusedLocals": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true
+  },
+  "include": ["typechecks/**/*.ts", "src/types/o11yService.types.ts"]
+}

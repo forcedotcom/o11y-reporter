@@ -1,0 +1,21 @@
+# Development files
+node_modules/
+.yarn/
+.yarnrc.yml
+tsconfig.json
+tsconfig.tsbuildinfo
+src/
+scripts/
+test/
+coverage/
+.git/
+.gitignore
+.eslintrc
+.prettierrc
+jest.config.js
+*.test.*
+*.spec.*
+
+# Build artifacts
+*.log
+*.tgz 

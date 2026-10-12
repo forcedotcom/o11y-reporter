@@ -1,0 +1,71 @@
+{
+  "name": "@salesforce/o11y-reporter",
+  "version": "0.0.0-semantically-released",
+  "description": "A wrapper service around o11y and o11y_schema for telemetry reporting.",
+  "workspaces": [
+    "packages/*"
+  ],
+  "main": "dist/index.bundle.min.cjs",
+  "module": "dist/index.bundle.min.mjs",
+  "types": "dist/index.bundle.d.ts",
+  "files": [
+    "dist/index.bundle.min.cjs",
+    "dist/index.bundle.min.mjs",
+    "dist/index.bundle.d.ts",
+    "README.md",
+    "LICENSE.txt"
+  ],
+  "scripts": {
+    "build": "tsc --build tsconfig.json",
+    "build:bundle": "node ./scripts/bundle-build.js",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "package": "yarn clean && yarn build && yarn build:bundle",
+    "test": "jest --testPathPattern=src/",
+    "test:watch": "jest --testPathPattern=src/ --watch",
+    "typecheck:headless": "tsc -p tsconfig.typecheck.json",
+    "format": "prettier --write \"**/*.{ts,js,json,md}\"",
+    "format:ci": "prettier --check .",
+    "eslint": "eslint . --ext .js,.ts",
+    "eslint:ci": "eslint . --ext .js,.ts --max-warnings 0",
+    "prepare": "husky"
+  },
+  "keywords": [
+    "salesforce",
+    "o11y",
+    "reporter"
+  ],
+  "author": "Salesforce",
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "o11y": "^266.18.0",
+    "o11y_schema": "^264.84.0"
+  },
+  "devDependencies": {
+    "@commitlint/config-conventional": "^19.7.1",
+    "@o11y/local-headless": "^266.18.0",
+    "@salesforce/core": "^8.26.2",
+    "@semantic-release/changelog": "^6.0.3",
+    "@semantic-release/git": "^10.0.1",
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.11.24",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "dts-bundle-generator": "^9.5.1",
+    "esbuild": "^0.25.8",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "husky": "^9.0.11",
+    "jest": "^29.7.0",
+    "prettier": "^3.2.5",
+    "semantic-release": "^24.2.1",
+    "ts-jest": "^29.1.2",
+    "typescript": "5.5.3"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "yarn@4.1.1"
+}

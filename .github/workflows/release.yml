@@ -1,0 +1,105 @@
+name: Release o11y-reporter
+on:
+  # Releases are paused while the open-source request is pending. Restore the
+  # `push` trigger below once the open-source release is approved.
+  #
+  # push:
+  #   branches: ["main"]
+  #   paths-ignore:
+  #     - ".gitignore"
+  #     - "CODEOWNERS"
+  workflow_dispatch: # Allow manual run from Actions tab
+
+jobs:
+  release:
+    strategy:
+      matrix:
+        node-version: [22.x]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: write # For GitHub releases and tags
+      pull-requests: read # For @semantic-release/github (associated PRs)
+      issues: write # For @semantic-release/github success step (comment on PR)
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: "yarn"
+          registry-url: https://registry.npmjs.org/
+
+      - name: Upgrade npm for OIDC trusted publishing
+        run: npm install -g npm@11.9.0
+
+      - run: yarn install
+      - run: yarn format:ci
+      - run: yarn eslint:ci
+      - run: yarn package
+
+      # Version, tag, and GitHub release only (npm publish disabled in .releaserc).
+      - run: yarn semantic-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # semantic-release only writes the version when it cuts a release. Without
+      # this check, a run with no releasable commits would publish the
+      # placeholder version below.
+      - name: Check whether a new version was released
+        id: release-check
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if [ "$VERSION" = "0.0.0-semantically-released" ]; then
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "released=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Rebuild so dist matches the new version.
+      - run: yarn package
+        if: steps.release-check.outputs.released == 'true'
+      - name: Publish to npm
+        if: steps.release-check.outputs.released == 'true'
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # Publish the workspace sub-package. It carries a `workspace:*` dependency
+      # on the root package, so it must publish via `yarn npm publish`, which
+      # rewrites `workspace:*` to the resolved version — plain `npm publish` would
+      # ship the literal protocol string and break installs. semantic-release only
+      # versions the root, so sync the sub-package to the just-released root
+      # version (lockstep) before publishing.
+      # token auth — yarn 4.1.1 predates OIDC (added in 4.10.0); also bootstraps
+      # the first publish. Unlike the root's `npm publish` above, this step gets
+      # no provenance attestation and depends on NPM_TOKEN staying alive.
+      #
+      # Follow-up for parity with the root (non-blocking, see W-21177302 for the
+      # adk-experts-lwc/aura precedent where a revoked token broke this exact
+      # pattern): bump `packageManager` to yarn@4.10.0+, register
+      # @salesforce/o11y-agent-stream as its own trusted publisher on npmjs.com,
+      # then drop YARN_NPM_AUTH_TOKEN.
+      - name: Publish o11y-agent-stream to npm
+        if: steps.release-check.outputs.released == 'true'
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          # Patch the version field directly instead of `npm version` — real npm
+          # syncs package-lock.json as part of that command, and npm's resolver
+          # has never understood the `workspace:*` dependency on the root, so it
+          # throws EUNSUPPORTEDPROTOCOL. `yarn npm publish` below does its own
+          # workspace-protocol rewrite and never shells out to real npm.
+          node -e "
+            const fs = require('fs');
+            const path = './packages/o11y-agent-stream/package.json';
+            const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+            pkg.version = process.argv[1];
+            fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + '\n');
+          " "$VERSION"
+          yarn workspace @salesforce/o11y-agent-stream build
+          yarn workspace @salesforce/o11y-agent-stream npm publish --access public
+        env:
+          YARN_NPM_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

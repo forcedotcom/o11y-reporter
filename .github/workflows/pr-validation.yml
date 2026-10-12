@@ -1,0 +1,80 @@
+name: Pull Request Validation
+
+on:
+  pull_request:
+    branches: ["main"]
+  push:
+    branches-ignore: ["main"]
+
+jobs:
+  validate:
+    strategy:
+      matrix:
+        node-version: [20.x]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: "yarn"
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: Check code formatting
+        run: yarn format:ci
+
+      - name: Run ESLint
+        run: yarn eslint:ci
+
+      - name: Build project
+        run: yarn build
+
+      - name: Run tests
+        run: yarn test --verbose --detectOpenHandles --forceExit
+
+      - name: Package project
+        run: yarn package
+
+  # The o11y-agent-stream workspace is CJS that require()s pure-ESM o11y /
+  # o11y_schema, so it needs Node >=22.12 (its declared engines floor) — the
+  # 20.x `validate` lane above would hit ERR_REQUIRE_ESM. It also type-imports
+  # the root's bundled dts, so the root must be packaged before it compiles.
+  validate-agent-stream:
+    strategy:
+      matrix:
+        node-version: [22.x]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: "yarn"
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: Package root (emits the bundled dts the workspace type-imports)
+        run: yarn package
+
+      - name: Build o11y-agent-stream
+        run: yarn workspace @salesforce/o11y-agent-stream build
+
+      - name: Test o11y-agent-stream
+        run: yarn workspace @salesforce/o11y-agent-stream test --verbose

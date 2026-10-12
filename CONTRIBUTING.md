@@ -1,102 +1,200 @@
-*This is a suggested `CONTRIBUTING.md` file template for use by open sourced Salesforce projects. The main goal of this file is to make clear the intents and expectations that end-users may have regarding this project and how/if to engage with it. Adjust as needed (especially look for `{project_slug}` which refers to the org and repo name of your project) and remove this paragraph before committing to your repo.*
+# Contributing to o11y-reporter
 
-# Contributing Guide For {NAME OF PROJECT}
+Thank you for your interest in contributing to o11y-reporter! This document provides guidelines and information for developers who want to contribute to this project.
 
-This page lists the operational governance model of this project, as well as the recommendations and requirements for how to best contribute to {PROJECT}. We strive to obey these as best as possible. As always, thanks for contributing – we hope these guidelines make it easier and shed some light on our approach and processes.
+## Pre-requisites
 
-# Governance Model
-> Pick the most appropriate one
+1. **Node.js**: We use Node.js 20 or higher. If you need to work with multiple versions of Node, consider using [nvm](https://github.com/creationix/nvm).
+2. **Yarn**: This repository uses [Yarn](https://yarnpkg.com/) to manage dependencies. Please install Yarn globally using `npm install --global yarn`.
+3. **Git**: Make sure you have Git installed and configured.
 
-## Community Based
+## Development Setupe
 
-The intent and goal of open sourcing this project is to increase the contributor and user base. The governance model is one where new project leads (`admins`) will be added to the project based on their contributions and efforts, a so-called "do-acracy" or "meritocracy" similar to that used by all Apache Software Foundation projects.
+### Initial Setup
 
-> or
+1. Clone this repository:
 
-## Salesforce Sponsored
+   ```bash
+   git clone <repo-url>
+   cd o11y-reporter
+   ```
 
-The intent and goal of open sourcing this project is to increase the contributor and user base. However, only Salesforce employees will be given `admin` rights and will be the final arbitrars of what contributions are accepted or not.
+2. Install dependencies:
 
-> or
+   ```bash
+   yarn install
+   ```
 
-## Published but not supported
+3. Build the package:
+   ```bash
+   yarn build
+   ```
 
-The intent and goal of open sourcing this project is because it may contain useful or interesting code/concepts that we wish to share with the larger open source community. Although occasional work may be done on it, we will not be looking for or soliciting contributions.
+### Development Workflow
 
-# Getting started
+1. We develop using feature branches off `main` and release from the `main` branch.
+2. Create a feature branch for your changes:
+   ```bash
+   git checkout -b feature/your-feature-name
+   ```
+3. Make your changes and test them locally.
+4. Commit your changes following our commit message format.
+5. Push your branch and create a pull request.
 
-Please join the community on {Here list Slack channels, Email lists, Glitter, Discord, etc... links}. Also please make sure to take a look at the project [roadmap](ROADMAP.md) to see where we are headed.
+## Available Scripts
 
-# Issues, requests & ideas
+### Build Commands
 
-Use GitHub Issues page to submit issues, enhancement requests and discuss ideas.
+- **`yarn build`**: Compiles TypeScript to JavaScript
+- **`yarn build:bundle`**: Creates bundled distribution files
+- **`yarn package`**: Cleans, builds, and bundles the package
+- **`yarn clean`**: Removes generated files and directories
 
-### Bug Reports and Fixes
--  If you find a bug, please search for it in the [Issues](https://github.com/{project_slug}/issues), and if it isn't already tracked,
-   [create a new issue](https://github.com/{project_slug}/issues/new). Fill out the "Bug Report" section of the issue template. Even if an Issue is closed, feel free to comment and add details, it will still
-   be reviewed.
--  Issues that have already been identified as a bug (note: able to reproduce) will be labelled `bug`.
--  If you'd like to submit a fix for a bug, [send a Pull Request](#creating_a_pull_request) and mention the Issue number.
-  -  Include tests that isolate the bug and verifies that it was fixed.
+### Testing Commands
 
-### New Features
--  If you'd like to add new functionality to this project, describe the problem you want to solve in a [new Issue](https://github.com/{project_slug}/issues/new).
--  Issues that have been identified as a feature request will be labelled `enhancement`.
--  If you'd like to implement the new feature, please wait for feedback from the project
-   maintainers before spending too much time writing the code. In some cases, `enhancement`s may
-   not align well with the project objectives at the time.
+- **`yarn test`**: Runs Jest tests
+- **`yarn test:watch`**: Runs tests in watch mode
 
-### Tests, Documentation, Miscellaneous
--  If you'd like to improve the tests, you want to make the documentation clearer, you have an
-   alternative implementation of something that may have advantages over the way it's currently
-   done, or you have any other change, we would be happy to hear about it!
-  -  If it's a trivial change, go ahead and [send a Pull Request](#creating_a_pull_request) with the changes you have in mind.
-  -  If not, [open an Issue](https://github.com/{project_slug}/issues/new) to discuss the idea first.
+### Code Quality Commands
 
-If you're new to our project and looking for some way to make your first contribution, look for
-Issues labelled `good first contribution`.
+- **`yarn format`**: Formats code using Prettier
+- **`yarn format:ci`**: Checks code formatting (used in CI)
+- **`yarn eslint`**: Lints code using ESLint
+- **`yarn eslint:ci`**: Lints code with strict settings (used in CI)
 
-# Contribution Checklist
+## Code Quality Standards
 
-- [x] Clean, simple, well styled code
-- [x] Commits should be atomic and messages must be descriptive. Related issues should be mentioned by Issue number.
-- [x] Comments
-  - Module-level & function-level comments.
-  - Comments on complex blocks of code or algorithms (include references to sources).
-- [x] Tests
-  - The test suite, if provided, must be complete and pass
-  - Increase code coverage, not versa.
-  - Use any of our testkits that contains a bunch of testing facilities you would need. For example: `import com.salesforce.op.test._` and borrow inspiration from existing tests.
-- [x] Dependencies
-  - Minimize number of dependencies.
-  - Prefer Apache 2.0, BSD3, MIT, ISC and MPL licenses.
-- [x] Reviews
-  - Changes must be approved via peer code review
+### Commit Message Format
 
-# Creating a Pull Request
+We enforce conventional commit message format using commitlint. Your commit messages must follow the [Conventional Commits](https://www.conventionalcommits.org/) specification:
 
-1. **Ensure the bug/feature was not already reported** by searching on GitHub under Issues.  If none exists, create a new issue so that other contributors can keep track of what you are trying to add/fix and offer suggestions (or let you know if there is already an effort in progress).
-2. **Clone** the forked repo to your machine.
-3. **Create** a new branch to contain your work (e.g. `git br fix-issue-11`)
-4. **Commit** changes to your own branch.
-5. **Push** your work back up to your fork. (e.g. `git push fix-issue-11`)
-6. **Submit** a Pull Request against the `main` branch and refer to the issue(s) you are fixing. Try not to pollute your pull request with unintended changes. Keep it simple and small.
-7. **Sign** the Salesforce CLA (you will be prompted to do so when submitting the Pull Request)
+- **feat**: A new feature
+- **fix**: A bug fix
+- **docs**: Documentation only changes
+- **style**: Changes that do not affect the meaning of the code
+- **refactor**: A code change that neither fixes a bug nor adds a feature
+- **perf**: A code change that improves performance
+- **test**: Adding missing tests or correcting existing tests
+- **chore**: Changes to the build process or auxiliary tools
 
-> **NOTE**: Be sure to [sync your fork](https://help.github.com/articles/syncing-a-fork/) before making a pull request.
+Example: `feat: add new telemetry event tracking`
 
-# Contributor License Agreement ("CLA")
-In order to accept your pull request, we need you to submit a CLA. You only need
-to do this once to work on any of Salesforce's open source projects.
+### Pre-commit Hooks
 
-Complete your CLA here: <https://cla.salesforce.com/sign-cla>
+Before commit and push, Husky will run several hooks to ensure:
 
-# Issues
-We use GitHub issues to track public bugs. Please ensure your description is
-clear and has sufficient instructions to be able to reproduce the issue.
+- Commit message format is correct
+- Code lints properly
+- Code compiles without errors
+- Tests pass
 
-# Code of Conduct
-Please follow our [Code of Conduct](CODE_OF_CONDUCT.md).
+## Testing
 
-# License
-By contributing your code, you agree to license your contribution under the terms of our project [LICENSE](LICENSE.txt) and to sign the [Salesforce CLA](https://cla.salesforce.com/sign-cla)
+### Running Tests
+
+```bash
+# Run all tests
+yarn test
+
+# Run tests in watch mode
+yarn test:watch
+
+# Run tests with specific pattern
+yarn test --testPathPattern=src/
+```
+
+### Test Structure
+
+Tests are located in the `src/test/` directory and use Jest as the testing framework. Make sure to write tests for any new functionality you add.
+
+## Code Style
+
+### TypeScript
+
+- We use TypeScript for type safety
+- Follow the existing code style and patterns
+- Ensure all new code is properly typed
+
+### Formatting
+
+- We use Prettier for code formatting
+- Run `yarn format` before committing to ensure consistent formatting
+- The CI pipeline will check formatting using `yarn format:ci`
+
+### Linting
+
+- We use ESLint for code quality
+- Run `yarn eslint` to check for linting issues
+- Fix any linting errors before committing
+- The CI pipeline will check linting using `yarn eslint:ci`
+
+## Project Structure
+
+```
+o11y-reporter/
+├── src/                    # Source code
+│   ├── index.ts           # Main entry point
+│   ├── o11yService.ts     # Core service implementation
+│   ├── types/             # TypeScript type definitions
+│   ├── utils/             # Utility functions
+│   └── test/              # Test files
+├── scripts/                # Build scripts
+├── dist/                   # Build output (generated)
+├── .github/workflows/     # GitHub Actions workflows
+│   ├── pr-validation.yml  # PR validation pipeline
+│   └── release.yml        # Release pipeline
+└── package.json           # Project configuration
+```
+
+## Pull Request Process
+
+1. **Create a feature branch** from `main`
+2. **Make your changes** following the coding standards
+3. **Write tests** for new functionality
+4. **Update documentation** if needed
+5. **Run local checks**:
+   ```bash
+   yarn clean
+   yarn install
+   yarn build
+   yarn test
+   yarn format
+   yarn eslint
+   ```
+6. **Commit your changes** using conventional commit format
+7. **Push your branch** and create a pull request
+8. **Ensure CI passes** - all checks must pass before merging
+
+## CI/CD Pipeline
+
+Our CI/CD pipeline uses GitHub Actions workflows that run the following checks:
+
+### Pull Request Validation (`.github/workflows/pr-validation.yml`)
+
+- Code formatting validation
+- ESLint checks
+- TypeScript compilation
+- Test execution
+- Build verification
+- Package creation
+
+### Release Pipeline (`.github/workflows/release.yml`)
+
+- All validation checks from PR validation
+- Semantic release to npm
+- Automatic versioning and changelog generation
+
+## Getting Help
+
+If you have questions or need help:
+
+1. Check the existing documentation
+2. Review the test files for examples
+3. Open an issue for bugs or feature requests
+4. Ask questions in pull request discussions
+
+## License
+
+This project is licensed under the Apache License 2.0. See the [LICENSE.txt](LICENSE.txt) file for details.
+
+Thank you for contributing to o11y-reporter!
