@@ -145,35 +145,40 @@ The service supports consumer-provided O11y schemas. This allows you to use cust
 }
 ```
 
-**Step 2: Import and use the schema with `logEventWithSchema(properties, schema)` (exactly two parameters):**
+**Step 2: Load the schema with a dynamic `import()` and use it with `logEventWithSchema(properties, schema)` (exactly two parameters):**
+
+`o11y_schema` is ESM-only, so load it with a dynamic `import()` rather than a static `import`. If your code is compiled to CommonJS, a static `import` becomes `require()`, which throws `ERR_REQUIRE_ESM` on Node versions before 20.19 and 22.12.
 
 ```typescript
 import { O11yService } from "@salesforce/o11y-reporter";
-// Import the schema object from o11y_schema
-// @ts-expect-error - o11y_schema package doesn't provide TypeScript declarations
-import { a4dInstrumentationSchema } from "o11y_schema/sf_a4dInstrumentation";
 
 const o11yService = O11yService.getInstance("your-extension");
 await o11yService.initialize("your-extension", "https://your-endpoint");
 
+// Cache the promise so the schema module is loaded only once.
+let pdpEventSchemaPromise: Promise<Record<string, unknown>> | undefined;
+const getPdpEventSchema = (): Promise<Record<string, unknown>> => {
+  pdpEventSchemaPromise ??=
+    // @ts-expect-error - o11y_schema package doesn't provide TypeScript declarations
+    import("o11y_schema/sf_pdp").then((m) => m.pdpEventSchema);
+  return pdpEventSchemaPromise;
+};
+
 // Two parameters only: (properties, schema). Shape of properties depends on your schema.
 o11yService.logEventWithSchema(
   { customProperty: "value" },
-  a4dInstrumentationSchema,
+  await getPdpEventSchema(),
 );
 
-// You can also use different schemas for different events
-// @ts-expect-error - o11y_schema package doesn't provide TypeScript declarations
-import { anotherSchema } from "o11y_schema/another_schema";
-
-o11yService.logEventWithSchema({ foo: "bar" }, anotherSchema);
+// Load other schemas the same way, e.g. import("o11y_schema/sf_a4dInstrumentation")
+// exports a4dInstrumentationSchema.
 ```
 
 **Note:** `logEventWithSchema(properties, schema)` takes exactly **two** parameters: the event properties object and the schema. You must provide a valid schema object (e.g. `Record<string, unknown>`). If you don't need a custom schema, use `logEvent(properties)` which uses the default schema.
 
 **Behavior:** Events sent with `logEventWithSchema(properties, schema)` are encoded using the schema you pass (e.g. `PdpEvent`, `a4dInstrumentationSchema`). They are not wrapped in the default A4dInstrumentation schema; the payload uses your schema's format directly (e.g. `sf.pdp.PdpEvent` in the binary payload).
 
-**Note:** The `o11y_schema` package doesn't provide TypeScript declarations. You may need to add `@ts-expect-error` comments or configure your TypeScript with `skipLibCheck: true` in `tsconfig.json`.
+**Note:** The `o11y_schema` package doesn't provide TypeScript declarations, so the dynamic `import()` needs a `@ts-expect-error` comment (or a local `declare module "o11y_schema/*";`). If you compile to CommonJS, use `"module": "node16"` or `"nodenext"` in `tsconfig.json`: with `"module": "commonjs"`, TypeScript rewrites `import()` to `require()`, which brings back the `ERR_REQUIRE_ESM` error.
 
 **With automatic batching enabled, events are automatically uploaded based on threshold (50KB) or periodic flush (30 seconds). You can also manually flush if needed:**
 
