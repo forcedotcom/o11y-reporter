@@ -200,9 +200,6 @@ const cleanup = o11yService.enableAutoBatching({
   enableShutdownHook: true, // Enable shutdown hooks (default: true)
   enableBeforeExitHook: true, // Enable beforeExit hook (default: true)
 });
-
-// Later, if you need to stop batching
-cleanup();
 ```
 
 **Batching Behavior:**
@@ -210,13 +207,28 @@ cleanup();
 - Events are buffered in memory until upload conditions are met
 - **Threshold-based upload**: Events are uploaded when buffer size reaches 50KB
 - **Periodic flush**: Events are automatically flushed every 30 seconds (configurable)
-- **Shutdown hooks**: Events are automatically flushed on application shutdown (SIGINT, SIGTERM, beforeExit)
+- **Shutdown hooks**: Buffered events are flushed on SIGINT, SIGTERM and beforeExit. These hooks only flush; they don't exit the process (see below).
 
 **Benefits:**
 
 - Reduces network overhead by batching multiple events
 - Improves performance by avoiding per-event uploads
 - Ensures events are not lost on application shutdown
+
+**Stopping batching on shutdown:**
+
+When your application or extension shuts down, call the cleanup function and then flush whatever is still buffered:
+
+```typescript
+cleanup(); // Stops the batching timer and removes the shutdown hooks. Does not flush.
+await o11yService.forceFlush(); // Uploads any events still in the buffer.
+```
+
+Call them in this order: `cleanup()` removes the shutdown hooks, so without the `forceFlush()` that follows it, events logged since the last upload are lost.
+
+- **CLIs and scripts:** the batching timer keeps Node's event loop alive, so the process won't exit on its own, and the `beforeExit` hook won't fire, until you call `cleanup()`. Run the two calls above when your work is done.
+- **Ctrl+C and termination signals:** the SIGINT and SIGTERM hooks flush events but don't exit, and registering them turns off Node's default exit on those signals. If your app doesn't already handle them, add a handler that runs the two calls above and then exits, for example `process.once("SIGINT", async () => { cleanup(); await o11yService.forceFlush(); process.exit(130); });`.
+- **VS Code extensions:** run the two calls in `deactivate()` and return the promise, so VS Code waits for the flush.
 
 ### 4. Manual Flush
 
@@ -294,6 +306,8 @@ o11yService.enableAutoBatching({ enableBeforeExitHook: false });
 
 5. **Manual Flush for Critical Events**: For critical events that need immediate upload, call `forceFlush()` after logging the event.
 
+6. **Stop Batching on Shutdown**: Call the cleanup function returned by `enableAutoBatching()`, then `await forceFlush()`, so the last events are sent and the batching timer doesn't keep the process alive.
+
 ## Example Implementation
 
 Here's a complete example of how to use the O11y Reporter in your extension:
@@ -303,6 +317,7 @@ import { O11yService } from "@salesforce/o11y-reporter";
 
 class YourExtension {
   private o11yService: O11yService;
+  private stopBatching?: () => void;
 
   constructor() {
     this.o11yService = O11yService.getInstance(extensionName);
@@ -315,7 +330,7 @@ class YourExtension {
     );
 
     // Enable automatic batching for efficient telemetry collection
-    this.o11yService.enableAutoBatching({
+    this.stopBatching = this.o11yService.enableAutoBatching({
       flushInterval: 30_000, // 30 seconds
       enableShutdownHook: true, // Flush on shutdown
     });
@@ -370,6 +385,17 @@ class YourExtension {
       await this.o11yService.upload();
     } catch (err) {
       console.error("Failed to send error telemetry:", err);
+    }
+  }
+
+  // Call on shutdown, e.g. from your extension's deactivate()
+  async dispose() {
+    try {
+      this.stopBatching?.(); // Stop the timer and remove the shutdown hooks
+      this.stopBatching = undefined;
+      await this.o11yService.forceFlush(); // Send any events still buffered
+    } catch (error) {
+      console.error("Failed to flush telemetry on shutdown:", error);
     }
   }
 }
