@@ -22,6 +22,7 @@
     "package": "yarn clean && yarn build && yarn build:bundle",
     "test": "jest --testPathPattern=src/",
     "test:watch": "jest --testPathPattern=src/ --watch",
+    "test:headless-integration": "node --test packages/o11y-agent-stream/e2e/headless-steel-thread.test.mjs packages/o11y-agent-stream/e2e/reporter-local-collector-proof.test.mjs",
     "typecheck:headless": "tsc -p tsconfig.typecheck.json",
     "format": "prettier --write \"**/*.{ts,js,json,md}\"",
     "format:ci": "prettier --check .",
@@ -40,12 +41,12 @@
     "access": "public"
   },
   "dependencies": {
-    "o11y": "^266.18.0",
+    "o11y": "266.24.0",
     "o11y_schema": "^264.84.0"
   },
   "devDependencies": {
     "@commitlint/config-conventional": "^19.7.1",
-    "@o11y/local-headless": "^266.18.0",
+    "@o11y/local-headless": "266.24.0",
     "@salesforce/core": "^8.26.2",
     "@semantic-release/changelog": "^6.0.3",
     "@semantic-release/git": "^10.0.1",

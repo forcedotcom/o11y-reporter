@@ -973,6 +973,7 @@ export class O11yService {
             "[O11yService][uploadAsNeededAsync] Error draining buffer in headless mode:",
             error,
           );
+          throw error;
         }
         return Promise.resolve([]);
       }
@@ -1151,10 +1152,16 @@ export class O11yService {
 
   /**
    * Force an immediate flush of buffered events, ignoring size threshold
-   * This is an alias for upload() with a more explicit name for batching scenarios
-   * @returns Promise that resolves when upload completes
+   * Remote uploads remain best-effort; headless drains reject on validation failure.
+   * @returns Promise that resolves when the selected route completes
    */
   public async forceFlush(): Promise<void> {
+    const owner = O11yService.sharedUploadOwner ?? this;
+    if (owner.headlessMode) {
+      // Explicit local flush must expose validation/drain failures to bounded hosts.
+      await this.uploadAsNeededAsync(true);
+      return;
+    }
     const status = this.getBatchStatus();
     if (!status.hasData) {
       return; // Nothing to flush

@@ -78,3 +78,6 @@ jobs:
 
       - name: Test o11y-agent-stream
         run: yarn workspace @salesforce/o11y-agent-stream test --verbose
+
+      - name: Test deterministic headless integration
+        run: yarn test:headless-integration

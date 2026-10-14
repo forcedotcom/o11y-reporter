@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@salesforce/o11y-reporter": "workspace:*",
-    "o11y": "^266.18.0",
+    "o11y": "266.24.0",
     "o11y_schema": "^264.117.0",
     "zod": "^3.25.0 || ^4.0.0"
   },

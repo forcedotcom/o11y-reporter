@@ -1645,10 +1645,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@o11y/local-headless@npm:^266.18.0":
-  version: 266.18.0
-  resolution: "@o11y/local-headless@npm:266.18.0"
-  checksum: 10c0/62cf80b731e4135d7d5ed5a01a186596d100eb2a5a1be5605cb9867c03a2dc364ae83e960d4197a0cfaa616d621144e3508a0b7586a8d244eff950e4269924e1
+"@o11y/local-headless@npm:266.24.0":
+  version: 266.24.0
+  resolution: "@o11y/local-headless@npm:266.24.0"
+  checksum: 10c0/f23155cfe0a10bfec2b26b239992738c0cdb3179febe0bd56561429776b294d35c43bcba8a96482dfc7b532930f480acdba9302af4aa694b553e052569fcdb3d
   languageName: node
   linkType: hard
 
@@ -1935,7 +1935,7 @@ __metadata:
     "@types/jest": "npm:^29.5.12"
     "@types/node": "npm:^20.11.24"
     jest: "npm:^29.7.0"
-    o11y: "npm:^266.18.0"
+    o11y: "npm:266.24.0"
     o11y_schema: "npm:^264.117.0"
     ts-jest: "npm:^29.1.2"
     typescript: "npm:5.5.3"
@@ -1953,7 +1953,7 @@ __metadata:
   resolution: "@salesforce/o11y-reporter@workspace:."
   dependencies:
     "@commitlint/config-conventional": "npm:^19.7.1"
-    "@o11y/local-headless": "npm:^266.18.0"
+    "@o11y/local-headless": "npm:266.24.0"
     "@salesforce/core": "npm:^8.26.2"
     "@semantic-release/changelog": "npm:^6.0.3"
     "@semantic-release/git": "npm:^10.0.1"
@@ -1967,7 +1967,7 @@ __metadata:
     eslint-config-prettier: "npm:^9.1.0"
     husky: "npm:^9.0.11"
     jest: "npm:^29.7.0"
-    o11y: "npm:^266.18.0"
+    o11y: "npm:266.24.0"
     o11y_schema: "npm:^264.84.0"
     prettier: "npm:^3.2.5"
     semantic-release: "npm:^24.2.1"
@@ -7016,14 +7016,14 @@ __metadata:
   languageName: node
   linkType: hard
 
-"o11y@npm:^266.18.0":
-  version: 266.18.0
-  resolution: "o11y@npm:266.18.0"
+"o11y@npm:266.24.0":
+  version: 266.24.0
+  resolution: "o11y@npm:266.24.0"
   dependencies:
     o11y_schema: "npm:264.105.0"
     protobufjs: "npm:7.5.6"
     web-vitals: "npm:^5.1.0"
-  checksum: 10c0/0f267c5a3ba5792c740400a01a37aa4a58c5a021fda0087a6259adb68a29b5fa3755c07cd6a7e30e3c775774a4a5f465ce15f3aeff1f62f54d778875cf5299c1
+  checksum: 10c0/1dc73a34d993d7cb01e3119e539dc66ecfa9beee567f2855afa388cb6fa25be30933624715b2a54c4a5f489b438c621bb2a167e745464bebca7163987124dbbc
   languageName: node
   linkType: hard
 

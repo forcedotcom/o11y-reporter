@@ -52,4 +52,49 @@ describe("createCollectorSink", () => {
     await sink.flush();
     expect(flushed).toBe(1);
   });
+
+  it("preserves semantic payloads; persistence redaction belongs to the host", () => {
+    const logged: Array<{ props: Record<string, unknown> }> = [];
+    const reporter = {
+      logEventWithSchema: (props: Record<string, unknown>) =>
+        logged.push({ props }),
+      forceFlush: async () => undefined,
+    } as unknown as SpanTapConfig["reporter"];
+    const sink = createCollectorSink({
+      sessionId: "sess-1",
+      reporter,
+    } as SpanTapConfig);
+    sink.emit({
+      ...rec,
+      kind: "decision",
+      schemaName: "sf.agenticTelemetry.DecisionEvent",
+      payload: {
+        decisionType: 1,
+        description: "PRIVATE_DESCRIPTION",
+        rationale: "PRIVATE_RATIONALE",
+      },
+    });
+
+    expect(logged[0].props.userPayload).toMatchObject({
+      payload: {
+        decisionType: 1,
+        description: "PRIVATE_DESCRIPTION",
+        rationale: "PRIVATE_RATIONALE",
+      },
+    });
+  });
+
+  it("retains pending records when reporter flush rejects", async () => {
+    const reporter = {
+      logEventWithSchema: jest.fn(),
+      forceFlush: jest.fn().mockRejectedValue(new Error("flush failed")),
+    } as unknown as SpanTapConfig["reporter"];
+    const sink = createCollectorSink({
+      sessionId: "sess-1",
+      reporter,
+    } as SpanTapConfig);
+    sink.emit(rec);
+    await expect(sink.flush()).rejects.toThrow("flush failed");
+    expect(sink.pending()).toHaveLength(1);
+  });
 });

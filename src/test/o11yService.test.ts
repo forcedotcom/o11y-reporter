@@ -958,6 +958,7 @@ describe("O11yService", () => {
   describe("Batching and Flush Mechanism", () => {
     beforeEach(() => {
       // Set up required shared resources for batching tests
+      (o11yService as any).headlessMode = false;
       const mockProtoEncoder = jest
         .fn()
         .mockReturnValue(new Uint8Array([1, 2, 3]));
@@ -977,6 +978,21 @@ describe("O11yService", () => {
     });
 
     describe("forceFlush", () => {
+      test("headless force flush exposes collector drain validation errors", async () => {
+        (o11yService as any).headlessMode = true;
+        (O11yService as any).sharedUploadOwner = o11yService;
+        (
+          O11yService as any
+        ).sharedInstrApp.simpleCollector.getRawContentsOfCoreEnvelope.mockImplementation(
+          () => {
+            throw new Error("validation drain failed");
+          },
+        );
+        jest.spyOn(console, "error").mockImplementation(() => {});
+        await expect(o11yService.forceFlush()).rejects.toThrow(
+          "validation drain failed",
+        );
+      });
       test("should force flush when service is initialized", async () => {
         jest.spyOn(o11yService, "uploadAsNeededAsync").mockResolvedValue([]);
 

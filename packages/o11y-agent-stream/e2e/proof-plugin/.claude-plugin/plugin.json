@@ -1,0 +1,6 @@
+{
+  "name": "o11y-headless-proof",
+  "description": "Local headless telemetry steel-thread test skill",
+  "version": "0.0.1",
+  "skills": "./skills"
+}

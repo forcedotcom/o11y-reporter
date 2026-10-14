@@ -1,6 +1,7 @@
 import {
   toolCallActivitySchema,
   workflowActivitySchema,
+  decisionEventSchema,
 } from "o11y_schema/sf_agenticTelemetry";
 import { buildActivityData } from "../buildActivityData";
 import type { SpanRecord } from "../types";
@@ -40,7 +41,7 @@ describe("buildActivityData", () => {
     });
   });
 
-  it("keeps enum fields as int32 numbers so the span is not dropped", () => {
+  it("retains published workflow schema and numeric enum fields unchanged", () => {
     const wfRecord: SpanRecord = {
       kind: "workflow",
       id: "sess-1:workflow",
@@ -53,6 +54,7 @@ describe("buildActivityData", () => {
       endMs: 5000,
       payload: {
         workflowName: "claude-code-session",
+        workflowType: 6,
         finishReason: 1,
         totalTokens: 42,
         totalCostUsd: 0.01,
@@ -60,6 +62,7 @@ describe("buildActivityData", () => {
     };
     const built = buildActivityData(wfRecord);
     expect(built.data.userPayload!.schema).toBe(workflowActivitySchema);
+    expect(built.data.userPayload!.payload).toBe(wfRecord.payload);
     expect(
       typeof (built.data.userPayload!.payload as { finishReason: unknown })
         .finishReason,
@@ -84,5 +87,7 @@ describe("buildActivityData", () => {
     expect(built.data.id).toBe("sess-1:decision:CHOOSE_TOOL:1");
     expect(built.data.userPayload).toBeDefined();
     expect(built.rootId).toBe("r1");
+    expect(built.data.userPayload!.schema).toBe(decisionEventSchema);
+    expect(built.data.userPayload!.payload).toBe(rec.payload);
   });
 });

@@ -46,8 +46,8 @@ export function createCollectorSink(config: SpanTapConfig): CollectorSink {
       return [...buffered];
     },
     async flush(): Promise<void> {
-      buffered.length = 0;
       await reporter.forceFlush();
+      buffered.length = 0;
     },
   };
 }

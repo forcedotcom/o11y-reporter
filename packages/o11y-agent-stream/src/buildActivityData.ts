@@ -45,6 +45,8 @@ export interface BuiltActivity {
  * wrapper, nesting the agenticTelemetry payload as user_payload. Identity,
  * timing and hierarchy live on the wrapper (id / parent_id / is_root /
  * duration); the payload carries only the schema's own fields.
+ * @param record Completed span with numeric enum values from the shared parser.
+ * @returns Activity data and schema retaining the span's correlation root.
  */
 export function buildActivityData(record: SpanRecord): BuiltActivity {
   const agenticSchema = AGENTIC_SCHEMA_BY_KIND[record.kind];
