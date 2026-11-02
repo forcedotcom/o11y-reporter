@@ -1,6 +1,6 @@
 {
   "name": "@salesforce/o11y-agent-stream",
-  "version": "0.0.0-semantically-released",
+  "version": "1.0.0",
   "description": "Layer-A Claude Agent SDK stream parser for @salesforce/o11y-reporter",
   "license": "Apache-2.0",
   "type": "commonjs",
@@ -14,7 +14,7 @@
     "test": "jest"
   },
   "dependencies": {
-    "@salesforce/o11y-reporter": "workspace:*",
+    "@salesforce/o11y-reporter": "workspace:^",
     "o11y": "266.24.0",
     "o11y_schema": "^264.117.0",
     "zod": "^3.25.0 || ^4.0.0"

@@ -1931,7 +1931,7 @@ __metadata:
   resolution: "@salesforce/o11y-agent-stream@workspace:packages/o11y-agent-stream"
   dependencies:
     "@anthropic-ai/claude-agent-sdk": "npm:^0.1.77"
-    "@salesforce/o11y-reporter": "workspace:*"
+    "@salesforce/o11y-reporter": "workspace:^"
     "@types/jest": "npm:^29.5.12"
     "@types/node": "npm:^20.11.24"
     jest: "npm:^29.7.0"
@@ -1948,7 +1948,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@salesforce/o11y-reporter@workspace:*, @salesforce/o11y-reporter@workspace:.":
+"@salesforce/o11y-reporter@workspace:., @salesforce/o11y-reporter@workspace:^":
   version: 0.0.0-use.local
   resolution: "@salesforce/o11y-reporter@workspace:."
   dependencies:
