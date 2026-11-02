@@ -21,9 +21,12 @@ interface CollectorSink extends SpanSink {
 /**
  * Default sink: maps each record to its Activity wire shape and delivers it to
  * the injected `O11yService` reporter via `logEventWithSchema`, threading
- * `rootId` as the third arg so a single root_id query joins the whole run
- * (Blocker #1). `flush()` calls `reporter.forceFlush()` to upload buffered
+ * `rootId` as the third arg so a single root_id query joins the whole run.
+ * `flush()` calls `reporter.forceFlush()` to upload buffered
  * events rather than silently dropping them.
+ * @param config Tap configuration containing the reporter transport.
+ * @returns Sink with emit, flush and a read-only pending-record inspection view.
+ * @throws Reporter errors propagate to the caller.
  */
 export function createCollectorSink(config: SpanTapConfig): CollectorSink {
   const buffered: BuiltActivity[] = [];

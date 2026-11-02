@@ -78,11 +78,10 @@ jobs:
       # the first publish. Unlike the root's `npm publish` above, this step gets
       # no provenance attestation and depends on NPM_TOKEN staying alive.
       #
-      # Follow-up for parity with the root (non-blocking, see W-21177302 for the
-      # adk-experts-lwc/aura precedent where a revoked token broke this exact
-      # pattern): bump `packageManager` to yarn@4.10.0+, register
-      # @salesforce/o11y-agent-stream as its own trusted publisher on npmjs.com,
-      # then drop YARN_NPM_AUTH_TOKEN.
+      # Follow-up for parity with the root (non-blocking, and it removes the
+      # risk of a revoked token breaking this step): bump `packageManager` to
+      # yarn@4.10.0+, register @salesforce/o11y-agent-stream as its own trusted
+      # publisher on npmjs.com, then drop YARN_NPM_AUTH_TOKEN.
       - name: Publish o11y-agent-stream to npm
         if: steps.release-check.outputs.released == 'true'
         run: |

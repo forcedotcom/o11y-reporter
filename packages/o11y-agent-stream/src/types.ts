@@ -14,7 +14,7 @@ import type { O11yService } from "@salesforce/o11y-reporter";
  * `exports` entry), so a type-only `import { SDKMessage } from
  * '@anthropic-ai/claude-agent-sdk'` cannot compile inside this CommonJS
  * `module: node16` sub-package — TypeScript raises TS1479 even though the import
- * is erased (ruling R11). The parser reads these fields only through structural
+ * is erased. The parser reads these fields only through structural
  * casts, never through the SDK's nominal type, so this local mirror is
  * behaviourally identical and keeps the agent SDK a purely optional peer (no
  * type- or run-time dependency on it). The trailing catch-all member keeps any

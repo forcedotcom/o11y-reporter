@@ -59,6 +59,7 @@ describe("enum drift guard vs installed o11y_schema", () => {
 
   it("FINISH_REASON ints match sf_agenticTelemetry FinishReason", () => {
     const schema = schemaEnumValues("FinishReason");
+    expect(schema).not.toHaveProperty("FINISH_REASON_SUCCESS");
     for (const [key, value] of Object.entries(FINISH_REASON)) {
       expect(schema[`FINISH_REASON_${key}`]).toBe(value);
     }
@@ -135,6 +136,82 @@ describe("DECISION_TYPE", () => {
 });
 
 describe("resolveEnum (reject, don't coerce)", () => {
+  describe.each([
+    ["finish_reason", FINISH_REASON],
+    ["workflow_type", WORKFLOW_TYPE],
+    ["decision_type", DECISION_TYPE],
+  ] as const)("%s", (field, table) => {
+    const prefix = `${field.toUpperCase()}_`;
+
+    it.each(Object.entries(table))(
+      "resolves bare and prefixed %s to %i",
+      (member, value) => {
+        expect(resolveEnum(field, member, table)).toEqual({ ok: true, value });
+        expect(resolveEnum(field, `${prefix}${member}`, table)).toEqual({
+          ok: true,
+          value,
+        });
+      },
+    );
+
+    it.each([
+      "UNKNOWN",
+      `${prefix}UNKNOWN`,
+      "",
+      prefix,
+      `${prefix}${prefix}UNSPECIFIED`,
+      "unspecified",
+      `${prefix.toLowerCase()}UNSPECIFIED`,
+      `${prefix}unspecified`,
+      ...["FINISH_REASON_", "WORKFLOW_TYPE_", "DECISION_TYPE_"]
+        .filter((other) => other !== prefix)
+        .map((other) => `${other}UNSPECIFIED`),
+      ...["constructor", "toString", "__proto__", "hasOwnProperty"].flatMap(
+        (member) => [member, `${prefix}${member}`],
+      ),
+    ])("rejects %p without coercion", (value) => {
+      expect(resolveEnum(field, value, table)).toEqual({
+        ok: true,
+        accepted: false,
+        dropped: "bad_enum",
+        reason: `unknown ${field}: ${JSON.stringify(value)}`,
+      });
+    });
+  });
+
+  it("rejects FINISH_REASON_SUCCESS rather than treating it as COMPLETED", () => {
+    expect(
+      resolveEnum("finish_reason", "FINISH_REASON_SUCCESS", FINISH_REASON),
+    ).toEqual({
+      ok: true,
+      accepted: false,
+      dropped: "bad_enum",
+      reason: 'unknown finish_reason: "FINISH_REASON_SUCCESS"',
+    });
+  });
+
+  it("checks an exact own entry before stripping a prefix", () => {
+    expect(
+      resolveEnum("decision_type", "DECISION_TYPE_PLAN", {
+        DECISION_TYPE_PLAN: 7,
+        PLAN: 1,
+      }),
+    ).toEqual({ ok: true, value: 7 });
+  });
+
+  it.each(["PLAN", "DECISION_TYPE_PLAN"])(
+    "rejects inherited %s entries",
+    (value) => {
+      const table = Object.create({ PLAN: 1, DECISION_TYPE_PLAN: 2 });
+      expect(resolveEnum("decision_type", value, table)).toEqual({
+        ok: true,
+        accepted: false,
+        dropped: "bad_enum",
+        reason: `unknown decision_type: ${JSON.stringify(value)}`,
+      });
+    },
+  );
+
   it("resolves a real member to its int", () => {
     expect(resolveEnum("decision_type", "CHOOSE_TOOL", DECISION_TYPE)).toEqual({
       ok: true,

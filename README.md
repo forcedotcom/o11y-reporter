@@ -14,14 +14,14 @@ import { O11yService } from "@salesforce/o11y-reporter";
 // Get the singleton instance
 const o11yService = O11yService.getInstance(extensionName);
 
-// Initialize with your extension name and upload endpoint (static endpoint only)
+// Initialize with your extension name and static Core upload endpoint.
 await o11yService.initialize(
   "your-extension-name",
   "https://your-upload-endpoint",
 );
 ```
 
-**Dynamic endpoint (authenticated org):** To send telemetry to the current org’s endpoint (with automatic fallback to the static endpoint if the connection is unavailable), pass an optional `getConnection` callback and, if needed, an options object with `dynamicO11yUploadEndpointPath`. If you omit the path, a default is used.
+**Core transport (authenticated org):** Default transport posts base64 envelopes through the authenticated Core Connect proxy at `/services/data/.../connect/proxy/ui-telemetry`, with automatic fallback to your static Core endpoint if the connection is unavailable. Pass an optional `getConnection` callback and, if needed, `dynamicO11yUploadEndpointPath` to override that Core Connect path.
 
 ```typescript
 import { O11yService, type Connection } from "@salesforce/o11y-reporter";
@@ -38,7 +38,7 @@ await o11yService.initialize(
 
 The `Connection` type is re-exported from `@salesforce/core`; depend on it when using `getConnection`.
 
-**Opt-in Falcon publishing (API key):** Publish telemetry to the Falcon service instead of the org/static endpoint by passing a `falcon` option. Opt-in is keyed on the API key: with a valid key **and** a resolved endpoint, Falcon becomes the selected upload destination; a missing key preserves the existing behavior exactly. Supply only the pod base host — the library appends the fixed `/ui-telemetry` ingest path. The key is sent as the `x-o11y-api-key` header; never hardcode it (read it from config/env), and note a key is valid only against the environment (`dev`/`prod`) it was minted on.
+**Off-core Falcon transport (API key):** Publish raw protobuf directly to Falcon instead of Core Connect/static transport by passing a `falcon` option. Opt-in is keyed on the API key: with a valid key **and** a resolved endpoint, Falcon becomes the selected upload destination; a missing key preserves Core behavior exactly. Supply only the pod base host — the library appends the fixed `/ui-telemetry` ingest path. The key is sent as the `x-o11y-api-key` header; never hardcode it (read it from config/env), and note a key is valid only against the environment (`dev`/`prod`) it was minted on.
 
 ```typescript
 import {
@@ -88,7 +88,7 @@ await o11yService.initialize(
 - **Single-product process** (CLI, ADK Agent, adk-mcp): one consumer _is_ the process, so `appName` may simply equal your `extensionName` (or any product label). Setting it is enough on its own.
 - **Co-hosted process** (Salesforce Extension Pack in one VS Code extension host): `appName` cannot vary per extension (first-writer-wins across the shared buffer), so don't try to make it the per-extension identifier — rely on `loggerName` (= `extensionName`), which is stamped per event automatically.
 
-**Input validation (fails closed):** `extensionName` is validated before any state is touched — it must be a non-blank string with no surrounding whitespace, no backtick, at most 80 characters, and must not be the registered app name (`"o11y-reporter-extensions"`) or a reserved o11y instrumentation name (`IdleDetector`, `Network`, `WebVitals`). A supplied `appName` must be non-blank. An invalid value is logged and telemetry is left uninitialized; it never throws, so a bad config cannot disrupt the host application. Valid names are preserved exactly (no trimming, prefixing, or hashing) so `extensionName === loggerName` on the wire.
+**Input validation (fails closed):** `extensionName` is validated before any state is touched — it must be a non-blank string with no surrounding whitespace, no backtick, no lone UTF-16 surrogate, at most 80 characters, and must not be the registered app name (`"o11y-reporter-extensions"`) or a reserved o11y instrumentation name (`IdleDetector`, `Network`, `WebVitals`). A supplied `appName` must be non-blank. An invalid value is logged and telemetry is left uninitialized; it never throws, so a bad config cannot disrupt the host application. Valid names are preserved exactly (no trimming, prefixing, or hashing) so `extensionName === loggerName` on the wire.
 
 ```typescript
 await o11yService.initialize(
@@ -130,6 +130,8 @@ o11yService.logEvent({
   },
 });
 ```
+
+`measurements` are fields on the logged event, not metrics. To record metrics, see [Metrics](#metrics).
 
 #### Using Custom Schema
 
@@ -252,6 +254,61 @@ console.log(`Buffer size: ${status.estimatedByteSize} bytes`);
 console.log(`Has data: ${status.hasData}`);
 console.log(`Over threshold: ${status.isOverThreshold}`);
 ```
+
+## Metrics
+
+See [Metrics API maintainer documentation](docs/metrics-api.md) for validation rules, upload sizing, test coverage, and known limits.
+
+Three methods record metrics. They have o11y-client's names and argument order, return `void` and, called on the service as below, never throw: a call that can't be recorded is dropped and reported on the console instead. As with `logEvent`, a detached method reference, such as `const { trackValue } = o11yService`, has no `this` and throws.
+
+| Method             | o11y metric                  | Use it for                               |
+| ------------------ | ---------------------------- | ---------------------------------------- |
+| `incrementCounter` | up-counter (upCounter)       | counting events                          |
+| `trackValue`       | value recorder               | recording each value, such as a duration |
+| `bucketValue`      | bucket histogram (histogram) | counting values into fixed buckets       |
+
+```typescript
+import { type MetricsTags } from "@salesforce/o11y-reporter";
+
+// After `await o11yService.initialize(...)` (step 1)
+const tags: MetricsTags = { command: "deploy", result: "ok" };
+
+// incrementCounter(operation, increment = 1, hasError = false, tags = {})
+o11yService.incrementCounter("command_runs");
+o11yService.incrementCounter("files_deployed", 12, false, tags);
+
+// trackValue(operation, value, hasError = false, tags = {})
+o11yService.trackValue("activation_ms", 412);
+
+// bucketValue(operation, value, buckets, hasError = false, tags = {})
+o11yService.bucketValue(
+  "deploy_duration_ms",
+  1834,
+  [100, 500, 1000, 5000, 10000],
+  false,
+  tags,
+);
+```
+
+- **Initialize first.** Calls made before `initialize()` completes are dropped with a `not-initialized` error.
+- **Names.** The metric's owner is the extension name passed to `initialize()`, and the server names it `<extensionName>.<operation>`. Don't repeat the extension name in `operation`; put the unit there instead, as in `activation_ms`.
+- **`hasError`** is sent as the tag `status`, with the value `error` or `success`.
+- **Whole numbers.** The server truncates values to whole numbers, so use integer units such as ms or bytes.
+- **Counters are 32-bit per upload window.** Increments are summed per upload window, and the server reads the total as a 32-bit int, so an increment that would take a counter's window total above 2147483647 is dropped.
+- **Buckets** are required: 1 to 20 unique whole numbers from 0 to 2147483647. A series keeps the buckets from its first call, so to change them, use a new operation name.
+- **Keep tags low-cardinality.** Each combination of operation, `hasError` and tag values is its own series. Number and boolean tag values are sent as strings, so `1` and `"1"` are the same value. o11y allows each extension 1000 counter, 500 value-recorder and 500 histogram series for the life of the process. The server allows 2000 series per extension per server JVM, and doesn't reset that until the JVM restarts. Don't put IDs, paths or free text in tags.
+- **Reserved tag keys.** `status` is replaced from `hasError`, a tag named `o11yApp` is rejected, and the server overwrites `monc_identifier`. The server may replace an `orgid` value with the org ID. At most 19 tags are allowed, not counting `status`.
+- **The metrics budget.** Recorded metrics count toward the batch size (`getBatchStatus().estimatedByteSize` and the auto-batching threshold). One upload window holds at most 131,072 bytes of metrics, about 16,000 values, shared by every extension in the process. Calls past the budget are dropped with a `budget` error until the next upload. If you see `budget` errors, record fewer values per window, or flush more often (a smaller `flushInterval` or `thresholdBytes`, or `forceFlush()`).
+- **Headless mode discards metrics.** The headless collector receives logs only. The methods still check each call, and they log a `headless` warning.
+- **Use these methods, not `instrumentation`.** The `instrumentation` field is typed for logs only. Metric calls made through it skip these checks, and one bad value can lose the whole upload window, including other extensions' logs.
+
+Dropped calls are reported with `console.error`, and calls recorded with a caveat with `console.warn`:
+
+```text
+[O11yService][bucketValue] Dropped metric buckets-not-integer: bucket entries must be whole numbers (operation "deploy_duration_ms")
+```
+
+Each message (method and code) is logged at most once a minute per extension (calls on an instance that has no extension name yet, because `initialize()` hasn't been called or rejected its `extensionName` or `appName`, share one limit); the next one logged says how many were suppressed in between.
 
 ## Configuration
 

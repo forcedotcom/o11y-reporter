@@ -38,11 +38,17 @@ jobs:
       - name: Build project
         run: yarn build
 
+      - name: Type-check (strict)
+        run: yarn typecheck:headless
+
       - name: Run tests
         run: yarn test --verbose --detectOpenHandles --forceExit
 
       - name: Package project
         run: yarn package
+
+      - name: Test metrics envelope (built bundle + real o11y)
+        run: yarn test:metrics-integration
 
   # The o11y-agent-stream workspace is CJS that require()s pure-ESM o11y /
   # o11y_schema, so it needs Node >=22.12 (its declared engines floor) — the
@@ -79,5 +85,5 @@ jobs:
       - name: Test o11y-agent-stream
         run: yarn workspace @salesforce/o11y-agent-stream test --verbose
 
-      - name: Test deterministic headless integration
-        run: yarn test:headless-integration
+      - name: Test stream delivery (built products + real LocalCollector)
+        run: yarn test:stream-integration

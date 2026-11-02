@@ -50,8 +50,6 @@ plugins:
           - type: "ci"
             section: "Continuous Integration"
             hidden: true
-        issuePrefixes: ["W-", "Work", "@W-"]
-        issueUrlFormat: "https://gus.my.salesforce.com/apex/ADM_WorkLocator?bugorworknumber=W-{{id}}"
   - - "@semantic-release/npm"
     - npmPublish: false # We publish via separate step using OIDC (no token)
   - "@semantic-release/github" # Publishes to GitHub

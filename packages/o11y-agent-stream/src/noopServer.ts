@@ -2,21 +2,19 @@ import { z } from "zod";
 
 /**
  * Registration-only in-process `o11y` MCP server. It makes `mcp__o11y__log_*`
- * legal + stream-visible; capture is o11y-agent-stream's remap (Task 3), so every
- * handler returns a content-wrapped CallToolResult and emits NOTHING. The four
- * shapes are the frozen Layer-B contract (Task 0.3): session_id is the required
- * first arg on all four so the pretooluse-open.sh-injected instruction
- * (unconditional) never fails inputSchema validation. session_id is accepted and
- * ignored (the parser stamps ids).
+ * legal + stream-visible; capture is handled by o11y-agent-stream, so every
+ * handler returns a content-wrapped CallToolResult and emits NOTHING. All four
+ * Layer-B tools require session_id in their input schema. The handlers accept
+ * and ignore it; the parser stamps ids from the tap's configured session.
  *
  * WARNING (host-scope contract): this server captures NOTHING on its own — it is
  * correct ONLY when its host's message stream is tapped by o11y-agent-stream. A
- * standalone / non-tapped host MUST bind these four tool names to the REAL emitting
- * server (o11y_mcp → o11y-processing-service), NOT this no-op; using the no-op
- * without a tap silently drops all Layer-B telemetry.
+ * standalone / non-tapped host MUST bind these four tool names to an emitting
+ * server, NOT this no-op; using the no-op without a tap silently drops all
+ * Layer-B telemetry.
  *
  * DI note: createSdkMcpServer/tool are injected by the host so this CommonJS
- * package never statically imports the ESM claude-agent-sdk (ruling R11).
+ * package never statically imports the ESM claude-agent-sdk.
  */
 type ToolFn = (
   name: string,
@@ -38,6 +36,12 @@ const ok = async (): Promise<unknown> => ({
   content: [{ type: "text", text: JSON.stringify({ ok: true }) }],
 });
 
+/**
+ * Create the registration-only server for a host that taps its message stream.
+ * @param sdk Host-provided SDK server factory and tool registration function.
+ * @returns SDK server exposing the four no-op Layer-B tools.
+ * @throws Propagates errors from the injected SDK functions.
+ */
 export function createNoopO11yServer(sdk: SdkMcpDeps): unknown {
   const { tool, createSdkMcpServer } = sdk;
   const sid = { session_id: z.string() };

@@ -15,5 +15,10 @@
     "skipLibCheck": true,
     "esModuleInterop": true
   },
-  "include": ["typechecks/**/*.ts", "src/types/o11yService.types.ts"]
+  "include": [
+    "typechecks/**/*.ts",
+    "src/types/o11yService.types.ts",
+    "src/types/bundle.drift-guard.ts",
+    "src/types/o11y.d.ts"
+  ]
 }

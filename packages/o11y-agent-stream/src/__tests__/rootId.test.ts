@@ -1,8 +1,7 @@
 import { deriveRootId } from "../rootId";
 
 describe("deriveRootId", () => {
-  // Golden vectors verified byte-identical against bash `_sf_root_id` (ingest.sh)
-  // and Python `derive_root_id` on 2026-09-08. Do NOT edit without re-deriving.
+  // Golden vectors for the shared root-id hash. Do NOT edit without re-deriving.
   it.each([
     ["test-session-1", "e8503a23416810990d9cc26ebaf01367"],
     ["abc123", "d33d2a546f4326b51ea45a7d7fd77812"],

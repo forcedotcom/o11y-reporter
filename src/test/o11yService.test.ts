@@ -165,13 +165,13 @@ describe("O11yService", () => {
     o11yService.instrumentation = { log: jest.fn() } as any;
 
     jest
-      .spyOn(o11yService, "uploadViaConnectionOrStaticAsync")
+      .spyOn(o11yService, "uploadViaCoreAsync")
       .mockResolvedValue({} as Response);
 
     await o11yService.upload();
 
     expect(mockProtoEncoder).toHaveBeenCalled();
-    expect(o11yService.uploadViaConnectionOrStaticAsync).toHaveBeenCalled();
+    expect(o11yService.uploadViaCoreAsync).toHaveBeenCalled();
   });
 
   test("should not upload if simpleCollector has no data", async () => {
@@ -183,7 +183,7 @@ describe("O11yService", () => {
 
     await o11yService.upload();
 
-    expect(o11yService.uploadViaConnectionOrStaticAsync).not.toHaveBeenCalled();
+    expect(o11yService.uploadViaCoreAsync).not.toHaveBeenCalled();
   });
 
   test("should handle missing sharedProtoEncoderFunc during upload", async () => {
@@ -240,7 +240,7 @@ describe("O11yService", () => {
   test("should throw error if o11yUploadEndpoint is undefined", async () => {
     o11yService.o11yUploadEndpoint = undefined;
     jest
-      .spyOn(o11yService, "uploadViaConnectionOrStaticAsync")
+      .spyOn(o11yService, "uploadViaCoreAsync")
       .mockRejectedValue(new Error("o11yUploadEndpoint is not defined"));
   });
 
@@ -642,7 +642,7 @@ describe("O11yService", () => {
 
     describe("identity input validation (rejected init claims no shared state)", () => {
       // Assert that a rejected initialize() left the service uninitialized AND did not claim any
-      // process-global identity/ownership. This is the core guarantee of Marty's review: an invalid
+      // process-global identity/ownership. This is the core guarantee: an invalid
       // FIRST caller must not determine shared state for everyone else.
       const expectNoSharedStateClaimed = (svc: O11yService) => {
         expect(svc.isInitialized()).toBe(false);
@@ -959,6 +959,7 @@ describe("O11yService", () => {
     beforeEach(() => {
       // Set up required shared resources for batching tests
       (o11yService as any).headlessMode = false;
+      (o11yService as any).falconUpload = undefined;
       const mockProtoEncoder = jest
         .fn()
         .mockReturnValue(new Uint8Array([1, 2, 3]));
@@ -994,15 +995,17 @@ describe("O11yService", () => {
         );
       });
       test("should force flush when service is initialized", async () => {
-        jest.spyOn(o11yService, "uploadAsNeededAsync").mockResolvedValue([]);
+        const upload = jest.spyOn(o11yService, "upload").mockResolvedValue();
 
         await o11yService.forceFlush();
 
-        expect(o11yService.uploadAsNeededAsync).toHaveBeenCalledWith(true);
+        expect(o11yService.upload).toHaveBeenCalled();
+        upload.mockRestore();
       });
 
       test("should not flush when service is not initialized", async () => {
         (O11yService as any).sharedProtoEncoderFunc = null;
+        (O11yService as any).sharedInstrApp.simpleCollector.hasData = true;
         jest.spyOn(console, "error").mockImplementation(() => {});
 
         await o11yService.forceFlush();
@@ -1014,7 +1017,8 @@ describe("O11yService", () => {
       });
 
       test("should handle errors gracefully during force flush", async () => {
-        jest
+        (O11yService as any).sharedInstrApp.simpleCollector.hasData = true;
+        const uploadAsNeededAsync = jest
           .spyOn(o11yService, "uploadAsNeededAsync")
           .mockRejectedValue(new Error("Upload failed"));
         jest.spyOn(console, "error").mockImplementation(() => {});
@@ -1026,6 +1030,7 @@ describe("O11yService", () => {
           "Telemetry upload failed:",
           expect.any(Error),
         );
+        uploadAsNeededAsync.mockRestore();
       });
     });
 
@@ -1358,7 +1363,7 @@ describe("O11yService", () => {
       test("keeps Falcon opted in with an undefined endpoint when none resolves for the selected environment", async () => {
         // Opt-in is keyed on the API key: a missing endpoint does NOT disable Falcon; it
         // leaves the endpoint undefined so the routing chain falls back (headless collector
-        // when injected, otherwise the existing org/static path).
+        // when injected, otherwise Core Connect/static transport).
         const svc = await initWith("http://static", undefined, {
           falcon: { apiKey: KEY, environment: "prod", endpoints: { dev: DEV } },
         });
@@ -1464,45 +1469,77 @@ describe("O11yService", () => {
           falcon: { apiKey: KEY, endpoint: DEV },
         });
         primeForUpload(svc);
-        jest
-          .spyOn(svc, "postToFalconServiceAsync")
+        const fetchSpy = jest
+          .spyOn(global, "fetch")
           .mockResolvedValue({ status: 202, ok: true } as Response);
-        jest.spyOn(svc, "uploadViaConnectionOrStaticAsync");
+        jest.spyOn(svc, "uploadViaCoreAsync");
 
         await svc.uploadAsNeededAsync(true);
 
-        expect(svc.postToFalconServiceAsync).toHaveBeenCalled();
-        expect(svc.uploadViaConnectionOrStaticAsync).not.toHaveBeenCalled();
+        expect(fetchSpy).toHaveBeenCalledWith(DEV, expect.anything());
+        expect(svc.uploadViaCoreAsync).not.toHaveBeenCalled();
       });
 
-      test("routes to the existing path when no Falcon key is configured", async () => {
+      test("Falcon emitter drains once and preserves raw Falcon routing", async () => {
+        const svc = await initWith("http://static", undefined, {
+          falcon: { apiKey: KEY, endpoint: DEV },
+        });
+        primeForUpload(svc);
+        const collector = (O11yService as any).sharedInstrApp.simpleCollector;
+        const fetchSpy = jest
+          .spyOn(global, "fetch")
+          .mockResolvedValue({ status: 200 } as Response);
+        const fallback = jest.spyOn(svc, "uploadViaCoreAsync");
+
+        await svc.uploadAsNeededAsync(true);
+
+        expect(collector.getRawContentsOfCoreEnvelope).toHaveBeenCalledTimes(1);
+        expect(fetchSpy).toHaveBeenCalledWith(DEV, expect.anything());
+        expect(fallback).not.toHaveBeenCalled();
+      });
+
+      test("routes via Core when no Falcon key is configured", async () => {
         const svc = await initWith("http://static");
         primeForUpload(svc);
         jest
-          .spyOn(svc, "uploadViaConnectionOrStaticAsync")
+          .spyOn(svc, "uploadViaCoreAsync")
           .mockResolvedValue({ status: 200, ok: true } as Response);
-        jest.spyOn(svc, "postToFalconServiceAsync");
 
         await svc.uploadAsNeededAsync(true);
 
-        expect(svc.uploadViaConnectionOrStaticAsync).toHaveBeenCalled();
-        expect(svc.postToFalconServiceAsync).not.toHaveBeenCalled();
+        expect(svc.uploadViaCoreAsync).toHaveBeenCalled();
       });
 
-      test("routes to the existing path when Falcon is opted in but no endpoint resolves (no collector)", async () => {
+      test("Core emitter drains once and preserves authenticated-org routing", async () => {
+        const requestPost = jest.fn().mockResolvedValue({});
+        const svc = await initWith(
+          "http://static",
+          jest.fn().mockResolvedValue({ requestPost }),
+        );
+        primeForUpload(svc);
+        const collector = (O11yService as any).sharedInstrApp.simpleCollector;
+
+        await svc.uploadAsNeededAsync(true);
+
+        expect(collector.getRawContentsOfCoreEnvelope).toHaveBeenCalledTimes(1);
+        expect(requestPost).toHaveBeenCalledWith(
+          "/services/data/v65.0/connect/proxy/ui-telemetry",
+          { base64Env: "AQID" },
+        );
+      });
+
+      test("routes via Core when Falcon is opted in but no endpoint resolves (no collector)", async () => {
         const svc = await initWith("http://static", undefined, {
           falcon: { apiKey: KEY },
         });
         primeForUpload(svc);
         jest
-          .spyOn(svc, "uploadViaConnectionOrStaticAsync")
+          .spyOn(svc, "uploadViaCoreAsync")
           .mockResolvedValue({ status: 200, ok: true } as Response);
-        jest.spyOn(svc, "postToFalconServiceAsync");
 
         await svc.uploadAsNeededAsync(true);
 
-        expect(svc.uploadViaConnectionOrStaticAsync).toHaveBeenCalled();
-        expect(svc.postToFalconServiceAsync).not.toHaveBeenCalled();
+        expect(svc.uploadViaCoreAsync).toHaveBeenCalled();
       });
 
       test("performs no network upload in headless mode (collector already captured locally)", async () => {
@@ -1513,59 +1550,24 @@ describe("O11yService", () => {
         });
         primeForUpload(svc);
         const fetchSpy = jest.spyOn(global, "fetch");
-        jest.spyOn(svc, "postToFalconServiceAsync");
-        jest.spyOn(svc, "uploadViaConnectionOrStaticAsync");
+        jest.spyOn(svc, "uploadViaCoreAsync");
 
         const results = await svc.uploadAsNeededAsync(true);
 
-        expect(results).toEqual([]);
-        expect(svc.postToFalconServiceAsync).not.toHaveBeenCalled();
-        expect(svc.uploadViaConnectionOrStaticAsync).not.toHaveBeenCalled();
+        expect(results).toEqual([{ status: "fulfilled", value: undefined }]);
+        expect(svc.uploadViaCoreAsync).not.toHaveBeenCalled();
         expect(fetchSpy).not.toHaveBeenCalled();
       });
     });
 
-    describe("postToFalconServiceAsync", () => {
-      test("posts raw bytes with octet-stream and x-o11y-api-key to the selected endpoint", async () => {
-        const svc = await initWith("http://static", undefined, {
-          falcon: { apiKey: KEY, endpoint: DEV },
-        });
-        const fetchSpy = jest
-          .spyOn(global, "fetch")
-          .mockResolvedValue({ status: 202, ok: true } as Response);
-
-        await svc.postToFalconServiceAsync(new Uint8Array([1, 2, 3]));
-
-        expect(fetchSpy).toHaveBeenCalledWith(
-          DEV,
-          expect.objectContaining({
-            method: "POST",
-            headers: {
-              "Content-Type": "application/octet-stream",
-              "x-o11y-api-key": KEY,
-            },
-          }),
-        );
-      });
-
-      test("rejects when Falcon is not configured", async () => {
-        const svc = await initWith("http://static");
-        await expect(
-          svc.postToFalconServiceAsync(new Uint8Array([1])),
-        ).rejects.toThrow("Falcon publishing is not configured");
-      });
-    });
-
-    describe("uploadViaConnectionOrStaticAsync fallback chain (no Falcon key)", () => {
+    describe("uploadViaCoreAsync fallback chain (no Falcon key)", () => {
       test("uses the authenticated org connection when available", async () => {
         const requestPost = jest.fn().mockResolvedValue({});
         const getConnection = jest.fn().mockResolvedValue({ requestPost });
         const svc = await initWith("http://static", getConnection);
         const fetchSpy = jest.spyOn(global, "fetch");
 
-        const res = await svc.uploadViaConnectionOrStaticAsync(
-          new Uint8Array([1, 2, 3]),
-        );
+        const res = await svc.uploadViaCoreAsync(new Uint8Array([1, 2, 3]));
 
         expect(requestPost).toHaveBeenCalled();
         expect(fetchSpy).not.toHaveBeenCalled();
@@ -1578,7 +1580,7 @@ describe("O11yService", () => {
           .spyOn(global, "fetch")
           .mockResolvedValue({ status: 200, ok: true } as Response);
 
-        await svc.uploadViaConnectionOrStaticAsync(new Uint8Array([1, 2, 3]));
+        await svc.uploadViaCoreAsync(new Uint8Array([1, 2, 3]));
 
         expect(fetchSpy).toHaveBeenCalledWith(
           "http://static",
@@ -1593,7 +1595,7 @@ describe("O11yService", () => {
           .spyOn(global, "fetch")
           .mockResolvedValue({ status: 200, ok: true } as Response);
 
-        await svc.uploadViaConnectionOrStaticAsync(new Uint8Array([1, 2, 3]));
+        await svc.uploadViaCoreAsync(new Uint8Array([1, 2, 3]));
 
         expect(fetchSpy).toHaveBeenCalledWith(
           "http://static",
@@ -1604,18 +1606,31 @@ describe("O11yService", () => {
       test("rejects when neither a connection nor a static endpoint is configured", async () => {
         const svc = await initWith("");
         await expect(
-          svc.uploadViaConnectionOrStaticAsync(new Uint8Array([1])),
+          svc.uploadViaCoreAsync(new Uint8Array([1])),
         ).rejects.toThrow("o11yUploadEndpoint is not defined");
       });
 
-      test("deprecated uploadToFalconAsync alias forwards to uploadViaConnectionOrStaticAsync", async () => {
+      test("deprecated uploadToFalconAsync alias forwards to uploadViaCoreAsync", async () => {
         const svc = await initWith("http://static");
         const binary = new Uint8Array([1, 2, 3]);
         const spy = jest
-          .spyOn(svc, "uploadViaConnectionOrStaticAsync")
+          .spyOn(svc, "uploadViaCoreAsync")
           .mockResolvedValue({ status: 200, ok: true } as Response);
 
         const res = await svc.uploadToFalconAsync(binary);
+
+        expect(spy).toHaveBeenCalledWith(binary);
+        expect(res.ok).toBe(true);
+      });
+
+      test("deprecated uploadViaConnectionOrStaticAsync alias forwards to uploadViaCoreAsync", async () => {
+        const svc = await initWith("http://static");
+        const binary = new Uint8Array([1, 2, 3]);
+        const spy = jest
+          .spyOn(svc, "uploadViaCoreAsync")
+          .mockResolvedValue({ status: 200, ok: true } as Response);
+
+        const res = await svc.uploadViaConnectionOrStaticAsync(binary);
 
         expect(spy).toHaveBeenCalledWith(binary);
         expect(res.ok).toBe(true);
@@ -1650,18 +1665,16 @@ describe("O11yService", () => {
         expect((O11yService as any).sharedUploadOwner).toBe(a);
 
         primeForUpload(b);
-        jest
-          .spyOn(a, "postToFalconServiceAsync")
+        const fetchSpy = jest
+          .spyOn(global, "fetch")
           .mockResolvedValue({ status: 202, ok: true } as Response);
-        jest.spyOn(b, "postToFalconServiceAsync");
-        jest.spyOn(b, "uploadViaConnectionOrStaticAsync");
+        jest.spyOn(b, "uploadViaCoreAsync");
 
         // B's timer drains the pooled buffer, but routing follows the OWNER (A) -> Falcon.
         await b.uploadAsNeededAsync(true);
 
-        expect(a.postToFalconServiceAsync).toHaveBeenCalled();
-        expect(b.postToFalconServiceAsync).not.toHaveBeenCalled();
-        expect(b.uploadViaConnectionOrStaticAsync).not.toHaveBeenCalled();
+        expect(fetchSpy).toHaveBeenCalledWith(DEV, expect.anything());
+        expect(b.uploadViaCoreAsync).not.toHaveBeenCalled();
       });
 
       test("headless owner wins: a later Falcon instance's drain performs no network upload (owner is zero-egress)", async () => {
@@ -1678,16 +1691,14 @@ describe("O11yService", () => {
 
         primeForUpload(b);
         const fetchSpy = jest.spyOn(global, "fetch");
-        jest.spyOn(b, "postToFalconServiceAsync");
-        jest.spyOn(b, "uploadViaConnectionOrStaticAsync");
+        jest.spyOn(b, "uploadViaCoreAsync");
 
         // Owner A is headless -> B's drain discards bytes; zero egress preserved.
         const results = await b.uploadAsNeededAsync(true);
 
-        expect(results).toEqual([]);
+        expect(results).toEqual([{ status: "fulfilled", value: undefined }]);
         expect(fetchSpy).not.toHaveBeenCalled();
-        expect(b.postToFalconServiceAsync).not.toHaveBeenCalled();
-        expect(b.uploadViaConnectionOrStaticAsync).not.toHaveBeenCalled();
+        expect(b.uploadViaCoreAsync).not.toHaveBeenCalled();
       });
 
       test("logs a conflict error when a later instance resolves a different destination", async () => {
@@ -1696,7 +1707,7 @@ describe("O11yService", () => {
           falcon: { apiKey: KEY, endpoint: DEV },
         });
         errorSpy.mockClear();
-        // No Falcon -> existing connection/static path, which conflicts with the owner's Falcon.
+        // No Falcon -> Core Connect/static path, which conflicts with the owner's Falcon.
         await initSecond("ext-b");
 
         expect(errorSpy).toHaveBeenCalledWith(

@@ -1,4 +1,4 @@
-// Span ids mirror the inside-out hooks (ingest.sh): `<sessionId>:workflow`,
+// Span ids use `<sessionId>:workflow` and
 // `<sessionId>:agent:<agentId>`. Tool spans are keyed by the SDK tool_use.id.
 
 export function workflowSpanId(sessionId: string): string {

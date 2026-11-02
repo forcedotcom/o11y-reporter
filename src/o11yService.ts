@@ -25,10 +25,37 @@ import type {
   Instrumentation,
   InstrumentedAppMethods,
   LocalHeadlessCollector,
+  MetricsTags,
   O11yModules,
   ProtoEncoderFuncType,
   SimpleCollector,
 } from "./types/o11yService.types";
+import {
+  checkArguments,
+  checkTags,
+  createMetricsState,
+  describeError,
+  failsTypeGate,
+  formatMetricMessage,
+  MAX_FIRST_BUCKETS,
+  MAX_INT32,
+  METRICS_BUDGET_BYTES,
+  metricWarnings,
+  REJECT_HINTS,
+  seriesKey,
+  seriesSize,
+  shouldLog,
+  siftTags,
+  snapshotBuckets,
+  sortedBucketsKey,
+  WARN_HINTS,
+  type ExtensionMetricsState,
+  type MetricCall,
+  type MetricMethod,
+  type RejectCode,
+  type WarnCode,
+} from "./metricsGuard";
+import { createTelemetryEmitter } from "./telemetryEmitters";
 import { loadO11yModules } from "./utils/o11yLoader";
 
 export type {
@@ -38,6 +65,7 @@ export type {
   FalconUploadOptions,
   InitializeOptions,
   LocalHeadlessCollector,
+  MetricsTags,
 } from "./types/o11yService.types";
 
 /**
@@ -108,16 +136,16 @@ export class O11yService {
   a4dO11ySchema: unknown;
   readonly environment: Record<string, string> = {};
 
-  // Connection method provided by extension for dynamic endpoint resolution
+  // Core Connection provided by extension for authenticated Connect proxy uploads.
   private getConnectionMethod: (() => Promise<Connection>) | null = null;
 
-  // Relative path for o11y upload when using connection.requestPost (see jsforce doc: relative path from root)
-  private dynamicO11yUploadEndpointPath =
+  // Relative Core Connect proxy path for connection.requestPost (see jsforce doc: relative path from root).
+  private coreConnectUploadPath =
     "/services/data/v65.0/connect/proxy/ui-telemetry";
 
   // Opt-in Falcon publishing config (see FalconUploadOptions), resolved at initialize().
   // Opt-in is keyed on the API key; when a Falcon endpoint also resolves, Falcon is the
-  // SELECTED upload destination instead of the existing org/static path. When the key is
+  // SELECTED upload destination instead of Core Connect/static transport. When the key is
   // present but no endpoint resolves, telemetry falls back to the local-headless collector
   // (see headlessMode). Null preserves current behavior exactly.
   private falconUpload: ResolvedFalconConfig | null = null;
@@ -144,7 +172,7 @@ export class O11yService {
 
   // ---------------------------------------------------------------------------
   // Application identity — THREE distinct surfaces, deliberately kept separate.
-  // Do NOT collapse them in future changes (see W-23947379).
+  // Do NOT collapse them in future changes.
   //
   //  1. Registered app / loggerAppName  ── process-global, registered EXACTLY ONCE
   //     via registerInstrumentedApp(REGISTERED_APP_NAME). Always "o11y-reporter-extensions".
@@ -196,7 +224,7 @@ export class O11yService {
   //
   // The buffer drained on flush is the STATIC shared SimpleCollector (one per process — the o11y
   // client permits only one registered app), but the upload destination (Falcon / headless /
-  // connection-or-static) is resolved per instance. When multiple extensions share one process
+  // Core Connect-or-static) is resolved per instance. When multiple extensions share one process
   // (e.g. the Salesforce Extension Pack, all in one VS Code extension host), each has its own
   // batching timer; whichever fires first drains ALL pooled events. Routing by that instance's
   // own config would non-deterministically send every extension's events to whatever destination
@@ -204,8 +232,16 @@ export class O11yService {
   // drain always routes via the owner's config — deterministic regardless of which timer fires.
   // A later initialize() that resolves a CONFLICTING destination is logged and ignored (its events
   // still follow the owner's route, since the buffer is shared). This mirrors the "first
-  // initialization wins" model W-23947379 uses for the shared appName. Reset with sharedInstrApp.
+  // initialization wins" model used for the shared appName. Reset with sharedInstrApp.
   private static sharedUploadOwner: O11yService | null = null;
+
+  // Metrics guard state (see recordMetric and src/metricsGuard.ts). metricsWindowBytes is the
+  // guard's byte estimate for the metrics recorded since the shared buffer was last drained; it is
+  // process-wide because the buffer is. metricsState is keyed by extensionName, not by instance,
+  // because o11y shares one instrumentation, and its series limits, per name. Every drain of the
+  // shared buffer starts a new window (see drainSharedCollector).
+  private static metricsWindowBytes = 0;
+  private static metricsState: Map<string, ExtensionMetricsState> = new Map();
 
   // Extension-specific properties
   private extensionName?: string;
@@ -271,11 +307,12 @@ export class O11yService {
    *
    * @param extensionName - Per-consumer identifier (e.g. "salesforcedx-vscode-core"); becomes the
    *   per-event `loggerName`. Validated up front (see {@link validateExtensionName}): must be a
-   *   non-blank string with no surrounding whitespace, no backtick, at most 80 characters, and must
-   *   not be the registered app name or a reserved o11y instrumentation name. An invalid value
+   *   non-blank string with no surrounding whitespace, no backtick, no lone UTF-16 surrogate, at
+   *   most 80 characters, and must not be the registered app name or a reserved o11y
+   *   instrumentation name. An invalid value
    *   leaves the service uninitialized (logged, non-throwing) without claiming any shared state.
-   * @param o11yUploadEndpoint - Static fallback endpoint URL; used when getConnection is not provided or fails.
-   * @param getConnection - Optional callback returning the current org's Connection (e.g. from workspace context). When provided and successful, uploads use the org endpoint via connection.requestPost.
+   * @param o11yUploadEndpoint - Static Core endpoint URL; used when getConnection is not provided or fails.
+   * @param getConnection - Optional callback returning the current org's Connection (e.g. from workspace context). When provided and successful, uploads use Core Connect via connection.requestPost.
    * @param options - Optional config; see {@link InitializeOptions}. A supplied `appName` must be
    *   non-blank (see {@link InitializeOptions.appName}).
    */
@@ -318,7 +355,7 @@ export class O11yService {
     // resolution and later conflict check; undefined -> defaults to REGISTERED_APP_NAME.
     this.requestedAppName = options?.appName;
     if (options?.dynamicO11yUploadEndpointPath) {
-      this.dynamicO11yUploadEndpointPath =
+      this.coreConnectUploadPath =
         options.dynamicO11yUploadEndpointPath.startsWith("/")
           ? options.dynamicO11yUploadEndpointPath
           : `/${options.dynamicO11yUploadEndpointPath}`;
@@ -327,7 +364,7 @@ export class O11yService {
     // Opt-in Falcon publishing (keyed on the API key). With a valid key and a resolvable
     // endpoint, Falcon is the selected upload destination. With a valid key but no endpoint,
     // telemetry falls back to the injected local-headless collector (headlessMode). A missing
-    // key disables Falcon and preserves the existing connection/static behavior exactly.
+    // key disables Falcon and preserves the existing Core Connect/static behavior exactly.
     this.falconUpload = options?.falcon
       ? O11yService.resolveFalconConfig(options.falcon)
       : null;
@@ -458,7 +495,7 @@ export class O11yService {
     if (this.falconUpload?.endpoint) {
       return `falcon:${this.falconUpload.endpoint}#${O11yService.fingerprintApiKey(this.falconUpload.apiKey)}`;
     }
-    return "connection-or-static";
+    return "core-connect-or-static";
   }
 
   /**
@@ -539,6 +576,8 @@ export class O11yService {
    *  - names > {@link MAX_EXTENSION_NAME_LENGTH} -> SILENTLY truncated (76 + "_CUT"), so loggerName
    *    would differ from what the caller passed;
    *  - the reserved backtick -> rejected by the client (it is the field delimiter);
+   *  - a lone UTF-16 surrogate -> invalid UTF-8, so the server rejects every envelope that carries
+   *    this extension's events (logs and metrics alike);
    *  - {@link REGISTERED_APP_NAME} -> collides with the app's own instrumentation (client throws
    *    "is being used by the app");
    *  - {@link RESERVED_INSTRUMENTATION_NAMES} -> aliases o11y-owned instrumentation (Network,
@@ -557,6 +596,11 @@ export class O11yService {
     }
     if (extensionName.trim().length === 0) {
       return "extensionName must not be blank/whitespace-only.";
+    }
+    if (/\p{Cs}/u.test(extensionName)) {
+      // Checked before the messages that echo the name: a lone surrogate can't be encoded as
+      // UTF-8, so it would garble the log line.
+      return "extensionName must not contain a lone UTF-16 surrogate (it cannot be encoded as UTF-8).";
     }
     if (extensionName !== extensionName.trim()) {
       return `extensionName must not have leading or trailing whitespace: "${extensionName}".`;
@@ -717,8 +761,10 @@ export class O11yService {
       }
 
       // Fresh shared buffer -> clear any prior owner so the first instance to finish
-      // initialize() against this app claims the upload destination. See sharedUploadOwner.
+      // initialize() against this app claims the upload destination (see sharedUploadOwner),
+      // and start a new metrics window, because the new buffer holds no metrics yet.
       O11yService.sharedUploadOwner = null;
+      O11yService.resetMetricsWindow();
 
       // CoreEnvelope appName (surface #2): first-writer-wins. This method is serialized and
       // runs on the FIRST instance to initialize, so its resolved appName wins for the whole
@@ -766,6 +812,7 @@ export class O11yService {
       O11yService.sharedAppName = null;
       O11yService.sharedProtoEncoderFunc = null;
       O11yService.sharedUploadOwner = null;
+      O11yService.resetMetricsWindow();
       // Don't throw - continue without telemetry
     }
   }
@@ -834,6 +881,356 @@ export class O11yService {
         "O11yService: Unable to log event - Instrumentation not initialized",
       );
     }
+  }
+
+  /**
+   * Add `increment` (default 1) to the up-counter series named by `operation` and `tags`. o11y
+   * rounds the increment to a whole number and sends one total per series per upload window;
+   * `hasError` sets the series' `status` tag. The call is checked first (see the README's Metrics
+   * section): a rejected call is dropped and reported with console.error, and a recorded call that
+   * may not show up as written is reported with console.warn, both rate-limited. Never throws when
+   * called on the service (a detached reference has no `this` and throws, as with logEvent).
+   */
+  public incrementCounter(
+    operation: string,
+    increment?: number,
+    hasError?: boolean,
+    tags?: MetricsTags,
+  ): void {
+    this.recordMetric(
+      "incrementCounter",
+      operation,
+      increment,
+      undefined,
+      hasError,
+      tags,
+    );
+  }
+
+  /**
+   * Record one value in the value-recorder series named by `operation` and `tags`. Use whole
+   * numbers in units such as ms or bytes, because the server truncates fractions. Checked and
+   * reported like {@link incrementCounter}. Never throws when called on the service.
+   */
+  public trackValue(
+    operation: string,
+    value: number,
+    hasError?: boolean,
+    tags?: MetricsTags,
+  ): void {
+    this.recordMetric(
+      "trackValue",
+      operation,
+      value,
+      undefined,
+      hasError,
+      tags,
+    );
+  }
+
+  /**
+   * Record one value in the bucket-histogram series named by `operation` and `tags`. `buckets` are
+   * the bucket boundaries: 1 to 20 unique whole numbers from 0 to 2147483647. A series keeps the
+   * buckets from its first call. Checked and reported like {@link incrementCounter}. Never throws
+   * when called on the service.
+   */
+  public bucketValue(
+    operation: string,
+    value: number,
+    buckets: number[],
+    hasError?: boolean,
+    tags?: MetricsTags,
+  ): void {
+    this.recordMetric("bucketValue", operation, value, buckets, hasError, tags);
+  }
+
+  /**
+   * The checked path behind the metric methods. Rejects inputs the server would
+   * drop or corrupt, forwards the rest to this extension's own instrumentation, counts what o11y
+   * accepted toward the upload window, and reports each reject and warning. Everything after the
+   * initialization check runs in one try: the snapshot can run caller code (getters, Proxy traps),
+   * and o11y throws on input it rejects itself.
+   */
+  private recordMetric(
+    method: MetricMethod,
+    operation: unknown,
+    amount: unknown,
+    buckets: unknown,
+    hasError: unknown,
+    tags: unknown,
+  ): void {
+    const state = O11yService.metricsStateFor(this.extensionName ?? "");
+    if (!this.isInitialized()) {
+      // logEvent's check and status line, both under one rate-limit decision.
+      if (
+        O11yService.reportMetric(
+          state,
+          "reject",
+          method,
+          "not-initialized",
+          REJECT_HINTS["not-initialized"],
+          operation,
+        )
+      ) {
+        console.error("Initialization status:", this.getInitializationStatus());
+      }
+      return;
+    }
+    try {
+      // Snapshot the inputs once. Every later check reads the snapshot, and the snapshot is what
+      // gets forwarded. The Map/Set test reads the caller's tags, because the copy drops a Map's
+      // entries.
+      let tagsSnapshot: unknown = tags;
+      let tagsMapOrSet = false;
+      if (typeof tags === "object" && tags !== null) {
+        tagsSnapshot = { ...tags };
+        const toStringTag = Object.prototype.toString.call(tags);
+        tagsMapOrSet =
+          toStringTag === "[object Map]" || toStringTag === "[object Set]";
+      }
+      const call: MetricCall = {
+        method,
+        operation,
+        amount,
+        buckets:
+          method === "bucketValue" ? snapshotBuckets(buckets) : undefined,
+        hasError,
+        tags: tagsSnapshot,
+      };
+
+      const argumentCode = checkArguments(call);
+      if (argumentCode) {
+        O11yService.reportMetric(
+          state,
+          "reject",
+          method,
+          argumentCode,
+          REJECT_HINTS[argumentCode],
+          operation,
+        );
+        return;
+      }
+      // o11y rejects these types before it records anything; its throw is reported below.
+      if (failsTypeGate(call)) {
+        this.delegateMetric(call);
+        return;
+      }
+      const tagRecord = tagsSnapshot as Record<string, unknown> | undefined;
+      const tagsCode = checkTags(tagRecord);
+      if (tagsCode) {
+        O11yService.reportMetric(
+          state,
+          "reject",
+          method,
+          tagsCode,
+          REJECT_HINTS[tagsCode],
+          operation,
+        );
+        return;
+      }
+      // o11y sends each tag value with toString(), so 1 and "1" are one series on the wire.
+      // Forward strings, so that o11y and the guard key them as one series too.
+      if (tagRecord) {
+        for (const tagKey of Object.keys(tagRecord)) {
+          const value = tagRecord[tagKey];
+          if (typeof value === "number" || typeof value === "boolean") {
+            tagRecord[tagKey] = String(value);
+          }
+        }
+      }
+
+      const sifted = siftTags(tagRecord, hasError);
+      const key = seriesKey(method, operation as string, sifted);
+      const entries = call.buckets?.entries as number[] | undefined;
+      const firstBuckets = state.firstBuckets.get(key);
+      const size = seriesSize(
+        method,
+        operation as string,
+        this.extensionName ?? "",
+        sifted,
+        firstBuckets?.count ?? entries?.length ?? 0,
+      );
+      // A series costs S - 8 on its first call in the window (the collector already counts 8 bytes
+      // per series), and each trackValue or bucketValue value is a packed 8-byte double.
+      const cost =
+        (state.touchedSeries.has(key) ? 0 : size - 8) +
+        (method === "incrementCounter" ? 0 : 8);
+      const counterTotal =
+        method === "incrementCounter"
+          ? (state.counterTotals.get(key) ?? 0) +
+            Math.round((amount as number | undefined) ?? 1)
+          : 0;
+      if (counterTotal > MAX_INT32) {
+        O11yService.reportMetric(
+          state,
+          "reject",
+          method,
+          "counter-overflow",
+          REJECT_HINTS["counter-overflow"],
+          operation,
+        );
+        return;
+      }
+      if (
+        cost > 0 &&
+        O11yService.metricsWindowBytes + cost > METRICS_BUDGET_BYTES
+      ) {
+        O11yService.reportMetric(
+          state,
+          "reject",
+          method,
+          "budget",
+          REJECT_HINTS.budget,
+          operation,
+        );
+        return;
+      }
+      const callBuckets = entries && {
+        joined: sortedBucketsKey(entries),
+        count: entries.length,
+      };
+      const warnings = metricWarnings(call, {
+        tagsMapOrSet,
+        bucketsChanged:
+          firstBuckets !== undefined &&
+          firstBuckets.joined !== callBuckets?.joined,
+        headless: (O11yService.sharedUploadOwner ?? this).headlessMode,
+      });
+
+      this.delegateMetric(call);
+
+      // Commit only after o11y accepted the call.
+      O11yService.metricsWindowBytes += cost;
+      state.touchedSeries.add(key);
+      if (method === "incrementCounter") {
+        state.counterTotals.set(key, counterTotal);
+      }
+      if (
+        callBuckets &&
+        !firstBuckets &&
+        state.firstBuckets.size < MAX_FIRST_BUCKETS
+      ) {
+        state.firstBuckets.set(key, callBuckets);
+      }
+      for (const code of warnings) {
+        O11yService.reportMetric(
+          state,
+          "warn",
+          method,
+          code,
+          WARN_HINTS[code],
+          operation,
+        );
+      }
+    } catch (error) {
+      O11yService.reportMetric(
+        state,
+        "reject",
+        method,
+        "threw",
+        describeError(error),
+        operation,
+      );
+    }
+  }
+
+  /** Forward a call to this extension's own instrumentation, passing every argument position. */
+  private delegateMetric(call: MetricCall): void {
+    const instrumentation = this.instrumentation!;
+    const operation = call.operation as string;
+    const hasError = call.hasError as boolean | undefined;
+    const tags = call.tags as MetricsTags | undefined;
+    if (call.method === "incrementCounter") {
+      instrumentation.incrementCounter(
+        operation,
+        call.amount as number | undefined,
+        hasError,
+        tags,
+      );
+    } else if (call.method === "trackValue") {
+      instrumentation.trackValue(
+        operation,
+        call.amount as number,
+        hasError,
+        tags,
+      );
+    } else {
+      instrumentation.bucketValue(
+        operation,
+        call.amount as number,
+        call.buckets?.value as number[] | undefined,
+        hasError,
+        tags,
+      );
+    }
+  }
+
+  /**
+   * Log one metric reject (console.error) or warning (console.warn), rate-limited per extension
+   * and `<method>:<code>` key. Returns whether the line was logged.
+   */
+  private static reportMetric(
+    state: ExtensionMetricsState,
+    kind: "reject" | "warn",
+    method: MetricMethod,
+    code: RejectCode | WarnCode,
+    hint: string,
+    operation: unknown,
+  ): boolean {
+    const suppressed = shouldLog(
+      state.limiter,
+      `${method}:${code}`,
+      Date.now(),
+    );
+    if (suppressed === null) {
+      return false;
+    }
+    const message = formatMetricMessage(
+      kind,
+      method,
+      code,
+      hint,
+      operation,
+      suppressed,
+    );
+    if (kind === "reject") {
+      console.error(message);
+    } else {
+      console.warn(message);
+    }
+    return true;
+  }
+
+  private static metricsStateFor(extensionName: string): ExtensionMetricsState {
+    let state = O11yService.metricsState.get(extensionName);
+    if (!state) {
+      state = createMetricsState();
+      O11yService.metricsState.set(extensionName, state);
+    }
+    return state;
+  }
+
+  /**
+   * Start a new metrics window. o11y sends no series again until it is updated after a drain, so
+   * the window's bytes, touched series and counter totals start over. First buckets and rate
+   * limits are kept: o11y keeps a series' buckets for the life of the process.
+   */
+  private static resetMetricsWindow(): void {
+    O11yService.metricsWindowBytes = 0;
+    for (const state of O11yService.metricsState.values()) {
+      state.touchedSeries.clear();
+      state.counterTotals.clear();
+    }
+  }
+
+  /**
+   * The one drain point for the shared buffer. A drain resets o11y's metrics, whatever then
+   * happens to the send, so the guard's window resets with it, in the same synchronous step.
+   */
+  private static drainSharedCollector(simpleCollector: SimpleCollector) {
+    const contents = simpleCollector.getRawContentsOfCoreEnvelope();
+    O11yService.resetMetricsWindow();
+    return contents;
   }
 
   public isInitialized(): boolean {
@@ -936,8 +1333,9 @@ export class O11yService {
 
   uploadAsNeededAsync(
     ignoreThreshold = false,
-  ): Promise<PromiseSettledResult<Response>[]> {
-    const promises: Promise<Response>[] = [];
+    telemetryEmitter?: ReturnType<O11yService["buildTelemetryEmitter"]>,
+  ): Promise<PromiseSettledResult<Response | undefined>[]> {
+    const promises: Promise<Response | undefined>[] = [];
 
     if (!O11yService.sharedProtoEncoderFunc) {
       if (!O11yService.loggedProtoEncoderNotInitialized) {
@@ -954,58 +1352,36 @@ export class O11yService {
       this.configuredThresholdBytes ?? this.O11Y_UPLOAD_THRESHOLD_BYTES;
     if (
       simpleCollector?.hasData &&
-      (ignoreThreshold || simpleCollector.estimatedByteSize >= thresholdBytes)
+      (ignoreThreshold ||
+        simpleCollector.estimatedByteSize + O11yService.metricsWindowBytes >=
+          thresholdBytes)
     ) {
       // The buffer drained here is the STATIC shared SimpleCollector, pooled across every
       // instance in the process. Route by the first-writer-wins OWNER's destination — not this
       // instance's — so the outcome is deterministic no matter which instance's batching timer
       // fires. See sharedUploadOwner / claimOrCheckSharedUploadDestination.
       const owner = O11yService.sharedUploadOwner ?? this;
+      const emitter =
+        telemetryEmitter ?? owner.buildTelemetryEmitter(simpleCollector);
 
-      // Headless mode: the injected local-headless collector already captured the log
-      // events to its local file; perform NO network upload (zero egress). We still drain
-      // the shared SimpleCollector's buffer (below) so it does not grow unbounded.
+      // Headless drain validation is a local contract. Unlike remote uploads, it must reject
+      // forceFlush so bounded hosts retain pending records instead of treating a failed drain as sent.
       if (owner.headlessMode) {
-        try {
-          simpleCollector.getRawContentsOfCoreEnvelope(); // drain buffer; discard bytes
-        } catch (error) {
-          console.error(
-            "[O11yService][uploadAsNeededAsync] Error draining buffer in headless mode:",
-            error,
-          );
-          throw error;
-        }
-        return Promise.resolve([]);
+        return emitter
+          .flush()
+          .then((value): PromiseSettledResult<Response | undefined>[] => [
+            { status: "fulfilled", value },
+          ]);
       }
 
-      try {
-        const rawContents = simpleCollector.getRawContentsOfCoreEnvelope();
-        const binary = O11yService.sharedProtoEncoderFunc(rawContents);
-        // Destination selection (opt-in Falcon publishing), routed via the shared-buffer owner:
-        //   - Falcon opted in with a resolved endpoint -> Falcon POST. On failure the POST
-        //     rejects (logged and rethrown); it does NOT fall back at runtime. The headless
-        //     collector is a config-time fallback for the no-endpoint case only (headlessMode,
-        //     handled above), not a catch for a failed Falcon POST.
-        //   - else existing path: authenticated org connection, then static endpoint.
-        if (owner.falconUpload?.endpoint) {
-          promises.push(owner.postToFalconServiceAsync(binary));
-        } else {
-          promises.push(owner.uploadViaConnectionOrStaticAsync(binary));
-        }
-      } catch (error) {
-        console.error(
-          "[O11yService][uploadAsNeededAsync] Error during upload encoding:",
-          error,
-        );
-        return Promise.resolve([]);
-      }
+      promises.push(emitter.flush());
     }
 
     return Promise.allSettled(promises).then(async (results) => {
       for (const result of results) {
         if (result.status === "fulfilled") {
           const response = result.value;
-          if (response.status < 200 || response.status >= 300) {
+          if (response && (response.status < 200 || response.status >= 300)) {
             console.error(
               `[O11yService][uploadAsNeededAsync] ✗ Upload FAILED with status ${response.status} ${response.statusText}. Events may not be in Splunk.`,
             );
@@ -1028,29 +1404,70 @@ export class O11yService {
   }
 
   /**
-   * @deprecated Renamed to {@link uploadViaConnectionOrStaticAsync}, which reflects what this
-   * path actually does (it never talked to the Falcon service). Retained as a forwarding alias
-   * for backward compatibility with any existing caller of the previously-public method; will be
-   * removed in a future major version. New code should call `uploadViaConnectionOrStaticAsync`.
+   * Select the owner-controlled strategy for one shared-buffer drain. Each emitter owns both
+   * consuming the collector and its send behavior, preventing a timer from mixing one instance's
+   * drain with another instance's destination.
    */
-  async uploadToFalconAsync(binary: Uint8Array): Promise<Response> {
-    return this.uploadViaConnectionOrStaticAsync(binary);
+  private buildTelemetryEmitter(simpleCollector: SimpleCollector) {
+    // Headless mode: the injected local-headless collector already captured the log events to its
+    // local file. Drain the shared buffer without network egress so it cannot grow unbounded.
+    if (this.headlessMode) {
+      return createTelemetryEmitter({
+        drain: () => O11yService.drainSharedCollector(simpleCollector),
+      });
+    }
+
+    const falconUpload = this.falconUpload;
+    if (falconUpload?.endpoint) {
+      return createTelemetryEmitter({
+        drain: () => O11yService.drainSharedCollector(simpleCollector),
+        encode: O11yService.sharedProtoEncoderFunc!,
+        falcon: {
+          endpoint: falconUpload.endpoint,
+          apiKey: falconUpload.apiKey,
+        },
+      });
+    }
+
+    return createTelemetryEmitter({
+      drain: () => O11yService.drainSharedCollector(simpleCollector),
+      encode: O11yService.sharedProtoEncoderFunc!,
+      send: (binary) => this.uploadViaCoreAsync(binary),
+    });
   }
 
   /**
-   * The existing (pre-Falcon) upload path. Despite the historical name it does NOT talk to
-   * the Falcon service: it posts the base64-encoded envelope to the authenticated org
-   * connection via `requestPost` (primary), falling back to the static `o11yUploadEndpoint`
-   * via `postRequest`. Selected by {@link uploadAsNeededAsync} when Falcon is not the chosen
-   * destination (no Falcon API key, or no resolved Falcon endpoint).
+   * @deprecated Core upload alias retained for compatibility. This method does not upload to
+   * Falcon; it forwards to {@link uploadViaCoreAsync}, which uses authenticated Core Connect or
+   * the configured static Core endpoint. Migrate callers to `uploadViaCoreAsync`. This alias may
+   * be removed in a future major version.
+   */
+  async uploadToFalconAsync(binary: Uint8Array): Promise<Response> {
+    return this.uploadViaCoreAsync(binary);
+  }
+
+  /**
+   * @deprecated Renamed to {@link uploadViaCoreAsync}. Retained for compatibility with the
+   * public API published in 1.11.0; will be removed in a future major version.
    */
   async uploadViaConnectionOrStaticAsync(
     binary: Uint8Array,
   ): Promise<Response> {
+    return this.uploadViaCoreAsync(binary);
+  }
+
+  /**
+   * Core transport path. Posts the base64-encoded envelope to the authenticated Core Connect
+   * proxy via `requestPost` (primary), falling back to the static Core endpoint via
+   * `postRequest`. This does not use Falcon API-key raw-protobuf ingest. Selected by
+   * {@link uploadAsNeededAsync} when Falcon is not the chosen destination (no Falcon API key,
+   * or no resolved Falcon endpoint).
+   */
+  async uploadViaCoreAsync(binary: Uint8Array): Promise<Response> {
     const b64 = Buffer.from(binary).toString("base64");
     const body = { base64Env: b64 };
 
-    // Existing path: authenticated org connection first (primary), static endpoint as its fallback.
+    // Core path: authenticated Connect proxy first, configured static Core endpoint as fallback.
     if (this.getConnectionMethod) {
       try {
         const connection = await this.getConnectionMethod();
@@ -1060,7 +1477,7 @@ export class O11yService {
           | null
           | undefined;
         if (conn?.requestPost) {
-          await conn.requestPost(this.dynamicO11yUploadEndpointPath, body);
+          await conn.requestPost(this.coreConnectUploadPath, body);
           return { status: 200, ok: true } as Response;
         }
       } catch {
@@ -1073,52 +1490,6 @@ export class O11yService {
       return Promise.reject(new Error("o11yUploadEndpoint is not defined"));
     }
     return this.postRequest(endpoint, body);
-  }
-
-  /**
-   * Publish the encoded envelope to the Falcon service (o11y-processing-service)
-   * using API-key authentication. This is the OPT-IN publishing path: when a Falcon
-   * API key AND a resolved endpoint are configured, Falcon is the SELECTED upload
-   * destination and replaces the existing org/static path for that upload. Only
-   * invoked from the routing chain when `falconUpload.endpoint` is set.
-   *
-   * Unlike the existing path, Falcon expects the RAW CoreEnvelope protobuf bytes with
-   * `Content-Type: application/octet-stream` (not the `{ base64Env }` JSON body), and
-   * authenticates by the `x-o11y-api-key` header rather than an org session. It always
-   * posts directly to the configured Falcon endpoint via fetch.
-   */
-  async postToFalconServiceAsync(binary: Uint8Array): Promise<Response> {
-    if (!this.falconUpload) {
-      return Promise.reject(new Error("Falcon publishing is not configured"));
-    }
-    const { endpoint } = this.falconUpload;
-    if (!endpoint) {
-      return Promise.reject(
-        new Error("Falcon endpoint is not defined for publishing"),
-      );
-    }
-    // Copy into a standalone ArrayBuffer (valid BodyInit) in case `binary` is a view over a
-    // larger backing buffer; equivalent to curl --data-binary of the raw protobuf bytes.
-    // Cast resolves the ArrayBufferLike union (never a SharedArrayBuffer here at runtime).
-    const bytes = binary.buffer.slice(
-      binary.byteOffset,
-      binary.byteOffset + binary.byteLength,
-    ) as ArrayBuffer;
-    return fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/octet-stream",
-        "x-o11y-api-key": this.falconUpload.apiKey,
-      },
-      // Send the raw protobuf bytes (equivalent to curl --data-binary).
-      body: bytes,
-    }).catch((error) => {
-      console.error(
-        `[O11yService][postToFalconServiceAsync] ✗ Falcon POST FAILED for ${endpoint}:`,
-        error instanceof Error ? error.message : error,
-      );
-      throw error;
-    });
   }
 
   postRequest(
@@ -1293,7 +1664,10 @@ export class O11yService {
   public getBatchStatus(): BatchStatus {
     const simpleCollector = O11yService.sharedInstrApp?.simpleCollector;
     const hasData = simpleCollector?.hasData || false;
-    const estimatedByteSize = simpleCollector?.estimatedByteSize || 0;
+    const estimatedByteSize = simpleCollector
+      ? (simpleCollector.estimatedByteSize || 0) +
+        O11yService.metricsWindowBytes
+      : 0;
     const thresholdBytes =
       this.configuredThresholdBytes ?? this.O11Y_UPLOAD_THRESHOLD_BYTES;
     const isOverThreshold = estimatedByteSize >= thresholdBytes;

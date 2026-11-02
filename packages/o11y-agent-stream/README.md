@@ -66,14 +66,6 @@ await tap.close();
 console.log(sink.records);
 ```
 
-### Local Integration Tests
-
-See [Headless Telemetry Integration Tests](./e2e/README.md) for development tests
-covering stream capture through `O11yService` and `LocalCollector`, failure-path
-checks, and an opt-in live Claude runner. These are repository test tools, not
-published runtime components. Deterministic tests and live model runs have separate
-commands and prerequisites.
-
 ## Correlation model
 
 - **`rootId`** — one per run. Omit it and the tap calls

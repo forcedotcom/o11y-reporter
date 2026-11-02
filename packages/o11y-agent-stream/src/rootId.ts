@@ -1,13 +1,14 @@
 import { createHash } from "node:crypto";
 
 /**
- * root id = sha256("sf-agent-root:" + seed)[:32]. Byte-identical to bash
- * `_sf_root_id` and Python `derive_root_id`. In a headless orchestrated run the
+ * root id = sha256("sf-agent-root:" + seed)[:32]. In a headless orchestrated run the
  * seed is the orchestrator's runId (SF_AGENT_ROOT_SEED), so every spawned session
  * shares one root_id. The seed is honored ONLY when SF_AGENT_HEADLESS_HOST is also
- * set — a leaked seed in a standalone session must not desync bash (which would use
- * the seed) from the Python server (which never overrides). Absent the gate, the
- * session id is the seed, exactly as before (1:1).
+ * set, so a leaked seed cannot change a standalone session's root. Absent the
+ * gate, the session id is the seed (1:1).
+ * @param sessionId Session id used as the seed outside a headless host.
+ * @param env Environment containing the optional headless host gate and run seed.
+ * @returns Deterministic 32-character lowercase hex root id.
  */
 export function deriveRootId(
   sessionId: string,

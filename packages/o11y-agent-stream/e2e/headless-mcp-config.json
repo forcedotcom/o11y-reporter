@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "o11y": {
-      "command": "node",
-      "args": ["packages/o11y-agent-stream/e2e/headless-o11y-mcp.mjs"]
-    }
-  }
-}

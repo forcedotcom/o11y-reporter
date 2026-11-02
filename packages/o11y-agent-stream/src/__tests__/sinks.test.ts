@@ -48,7 +48,7 @@ describe("createCollectorSink", () => {
     sink.emit(rec);
     expect(sink.pending()).toHaveLength(1);
     expect(logged).toHaveLength(1);
-    expect(logged[0].rootId).toBe("root-abc"); // Blocker #1: root_id must reach the reporter
+    expect(logged[0].rootId).toBe("root-abc"); // root_id must reach the reporter
     await sink.flush();
     expect(flushed).toBe(1);
   });

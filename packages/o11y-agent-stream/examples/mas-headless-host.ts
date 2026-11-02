@@ -5,22 +5,18 @@
  * session it spawns under one run: derive a shared `root_id` from the
  * orchestrator's `runId`, inject the two spawn-scoped env vars, register the
  * in-process no-op `o11y` server, and attach the span tap with a host-stamped
- * `rootId`/`parentId` so every session under that run joins the same trace
- * (consumed by the Task 11 validation harness, which runs this twice with the
- * same `runId` and different `sessionSeedIndex` to produce a joined run).
+ * `rootId`/`parentId` so every session under that run joins the same trace.
+ * Sessions share a `runId` and use distinct `sessionSeedIndex` values.
  *
  * This file imports `@anthropic-ai/claude-agent-sdk` directly. That is legal
  * here (an illustrative ESM example) but is NOT legal inside
- * `@salesforce/o11y-agent-stream`'s CommonJS package source (ruling R11) — the
+ * `@salesforce/o11y-agent-stream`'s CommonJS package source: the
  * package only ever receives `createSdkMcpServer`/`tool` via dependency
  * injection (see `createNoopO11yServer` / `SdkMcpDeps`), so it never takes a
  * static or type-only dependency on the ESM-only SDK.
  *
- * For the MAS ADK insertion point (where this same wiring is applied inside
- * `run-adk-claude-agent-shared.ts`, AFTER workflow-input parsing) and the
- * host-selection matrix (tapped host -> no-op `o11y`; non-tapped host -> the
- * real `o11y_mcp`), see:
- *   instrumentation-sme/docs/architecture/mas-headless-wiring.md
+ * Use the no-op server only when a span tap consumes the message stream.
+ * Without a tap, the no-op server produces no telemetry.
  */
 import {
   query,
@@ -34,6 +30,15 @@ import {
   type SdkMcpDeps,
 } from "@salesforce/o11y-agent-stream";
 
+/**
+ * Run one tapped session under a shared orchestration root.
+ * @param {string} runId Shared run identifier.
+ * @param {number} sessionSeedIndex Unique session index within the run.
+ * @param {any} reporter Reporter consumed by the span tap.
+ * @param {string} prompt Prompt passed to the SDK.
+ * @returns {Promise<string>} The shared root ID after the stream and tap finish.
+ * @throws Propagates SDK and span-tap failures.
+ */
 export async function runHeadlessSession(
   runId: string,
   sessionSeedIndex: number,
@@ -57,26 +62,24 @@ export async function runHeadlessSession(
   }; // spawn-scoped
 
   // 3. Register the in-process no-op `o11y` server. Binding the no-op here is
-  //    correct ONLY because this host IS tapped (step 5) — see the
-  //    host-selection matrix in the playbook before reusing this snippet for a
-  //    non-tapped / standalone host.
+  //    correct only because this host is tapped (step 5). Without a tap,
+  //    the no-op server produces no telemetry.
   //
-  //    Ruling 11 cast: SdkMcpDeps intentionally types createSdkMcpServer/tool with
+  //    SdkMcpDeps intentionally types createSdkMcpServer/tool with
   //    `unknown`-bearing signatures so the CJS package never hard-depends on the
   //    SDK's concrete types. That same looseness bites on the INPUT side too: the
   //    real (imported) createSdkMcpServer's stricter `tools: SdkMcpToolDefinition[]`
   //    parameter isn't assignable to SdkMcpDeps's deliberately loose `tools:
-  //    unknown[]` slot, so the DI object needs the same "honest, localized" cast
-  //    treatment as the output below. Both casts stay in this ESM example only —
-  //    noopServer.ts is untouched.
+  //    unknown[]` slot, so both input and output need localized casts.
+  //    These casts stay in this ESM example, outside the package source.
   const o11y = createNoopO11yServer({
     createSdkMcpServer,
     tool,
   } as SdkMcpDeps) as ReturnType<typeof createSdkMcpServer>;
 
   // 4. Per-session id + tap, host-stamped with the shared rootId and a
-  //    parentId pointing at the spawning orchestrator span (cross-session
-  //    nesting; deferrable — see the playbook).
+  //    parentId pointing at the spawning orchestrator span for cross-session
+  //    nesting.
   const sessionId = `${runId}:${sessionSeedIndex}`;
   const tap = createSpanTap({
     sessionId,

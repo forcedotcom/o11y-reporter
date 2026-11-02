@@ -22,4 +22,5 @@ export {
   type FalconUploadOptions,
   type InitializeOptions,
   type LocalHeadlessCollector,
+  type MetricsTags,
 } from "./o11yService";

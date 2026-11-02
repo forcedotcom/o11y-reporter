@@ -42,10 +42,13 @@ export type EnumResolution =
   | { ok: true; accepted: false; dropped: "bad_enum"; reason: string };
 
 /**
- * TS analogue of o11y_mcp server.py `_resolve_enum` ("Kashi's comment-3"): a real
- * member resolves to its int; an unknown member is REJECTED as a never-throw
- * ok-error, NOT silently coerced to 0/UNSPECIFIED (which is indistinguishable from
- * unset and uncounted). Callers only invoke this for a present value.
+ * Resolve a bare enum member or its field-prefixed alias to an integer.
+ *
+ * @param {string} field Enum field name used to derive the exact uppercase prefix.
+ * @param {string} value Member name to resolve, without case normalization.
+ * @param {Record<string, number>} table Own entries mapped to schema integers.
+ * @returns {EnumResolution} The resolved integer, or a bad_enum rejection without
+ * coercing unknown members to 0/UNSPECIFIED.
  */
 export function resolveEnum(
   field: string,
@@ -54,6 +57,13 @@ export function resolveEnum(
 ): EnumResolution {
   if (Object.prototype.hasOwnProperty.call(table, value)) {
     return { ok: true, value: table[value] };
+  }
+  const prefix = `${field.toUpperCase()}_`;
+  if (value.startsWith(prefix)) {
+    const bare = value.slice(prefix.length);
+    if (Object.prototype.hasOwnProperty.call(table, bare)) {
+      return { ok: true, value: table[bare] };
+    }
   }
   return {
     ok: true,

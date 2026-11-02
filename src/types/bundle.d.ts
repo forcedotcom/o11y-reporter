@@ -56,6 +56,9 @@ export interface FalconUploadOptions {
   endpoint?: string;
 }
 
+/** Tags for a metric series. Each distinct set of tag values is a separate series, so keep tags low-cardinality. */
+export type MetricsTags = Record<string, string | number | boolean>;
+
 /**
  * Structural contract for a local-headless log collector (e.g. @o11y/local-headless
  * LocalCollector), registered on the shared app as the fallback for the Falcon path.
@@ -118,6 +121,28 @@ export declare class O11yService {
     schema: unknown,
     rootId?: string,
   ): void;
+  /** Add `increment` (default 1) to an up-counter series. Checked, then recorded; never throws when called on the service (a detached reference has no `this` and throws, as with logEvent). See the README's Metrics section. */
+  incrementCounter(
+    operation: string,
+    increment?: number,
+    hasError?: boolean,
+    tags?: MetricsTags,
+  ): void;
+  /** Record one value in a value-recorder series. Use whole numbers in units such as ms or bytes. Never throws when called on the service. */
+  trackValue(
+    operation: string,
+    value: number,
+    hasError?: boolean,
+    tags?: MetricsTags,
+  ): void;
+  /** Record one value in a bucket-histogram series; `buckets` are 1 to 20 unique whole numbers from 0 to 2147483647. Never throws when called on the service. */
+  bucketValue(
+    operation: string,
+    value: number,
+    buckets: number[],
+    hasError?: boolean,
+    tags?: MetricsTags,
+  ): void;
   upload(): Promise<void>;
   initSimpleCollector(
     o11yApp: InstrumentedAppMethods,
@@ -127,10 +152,11 @@ export declare class O11yService {
   uploadAsNeededAsync(
     ignoreThreshold?: boolean,
   ): Promise<PromiseSettledResult<Response>[]>;
-  /** @deprecated Renamed to uploadViaConnectionOrStaticAsync; retained as a forwarding alias for backward compatibility. */
+  /** @deprecated Core upload alias retained for compatibility. Migrate to uploadViaCoreAsync. */
   uploadToFalconAsync(binary: Uint8Array): Promise<Response>;
+  /** @deprecated Renamed to uploadViaCoreAsync. Retained for compatibility. */
   uploadViaConnectionOrStaticAsync(binary: Uint8Array): Promise<Response>;
-  postToFalconServiceAsync(binary: Uint8Array): Promise<Response>;
+  uploadViaCoreAsync(binary: Uint8Array): Promise<Response>;
   postRequest(endpoint: string, body: any): Promise<any>;
   forceFlush(): Promise<void>;
   enableAutoBatching(options?: BatchingOptions): () => void;
@@ -147,6 +173,7 @@ export interface BatchingOptions {
 
 export interface BatchStatus {
   hasData: boolean;
+  /** Estimated size of the buffered upload in bytes, including the metrics recorded since the last upload. */
   estimatedByteSize: number;
   thresholdBytes: number;
   isOverThreshold: boolean;

@@ -1,4 +1,4 @@
-import { FINISH_REASON } from "../enums";
+import { DECISION_TYPE, FINISH_REASON, WORKFLOW_TYPE } from "../enums";
 import { deriveRootId } from "../rootId";
 import { CaptureSink } from "../sinks";
 import { createSpanTap } from "../spanTap";
@@ -220,9 +220,8 @@ describe("createSpanTap Layer-A mapping", () => {
     expect(innerTool.parentId).toBe("sess-1:agent:toolu_task");
   });
 
-  it("treats an `Agent`-named spawner (Bedrock/FleetView CLI) the same as `Task`", async () => {
-    // The Agent SDK / standard Claude Code name the sub-agent spawner `Task`,
-    // but the Bedrock/FleetView CLI build names it `Agent`. Both must anchor an
+  it("treats an `Agent`-named spawner the same as `Task`", async () => {
+    // Sub-agent spawners can be named `Task` or `Agent`. Both must anchor an
     // AgentActivity (not a redundant ToolCallActivity) and harvest subagent_type.
     const { tap, sink } = newTap();
     await tap.onMessage(sys("sess-1"));
@@ -340,6 +339,57 @@ describe("createSpanTap Layer-A mapping", () => {
 });
 
 describe("Layer-B remap for the o11y server (commit on non-error tool_result)", () => {
+  it.each([
+    ["CHOOSE_TOOL", "FEATURE", "COMPLETED"],
+    ["UNSPECIFIED", "UNSPECIFIED", "UNSPECIFIED"],
+  ] as const)(
+    "decodes prefixed %s/%s/%s into numeric payloads",
+    async (decision, workflow, finish) => {
+      const errors: unknown[] = [];
+      const sink = new CaptureSink();
+      const tap = createSpanTap(
+        { sessionId: "sess-1", reporter: {} as any } as SpanTapConfig,
+        { sink, onError: (e) => errors.push(e) },
+      );
+      await tap.onMessage(sys("sess-1"));
+      await tap.onMessage(
+        assistantToolUse("sess-1", "toolu_d", "mcp__o11y__log_decision", {
+          session_id: "sess-1",
+          decision_type: `DECISION_TYPE_${decision}`,
+        }),
+      );
+      expect(byKind(sink.records, "decision")).toHaveLength(0);
+      await tap.onMessage(userToolResult("sess-1", "toolu_d"));
+      await tap.onMessage(
+        assistantToolUse(
+          "sess-1",
+          "toolu_m",
+          "mcp__o11y__set_workflow_metadata",
+          {
+            session_id: "sess-1",
+            workflow_type: `WORKFLOW_TYPE_${workflow}`,
+            finish_reason: `FINISH_REASON_${finish}`,
+          },
+        ),
+      );
+      await tap.onMessage(userToolResult("sess-1", "toolu_m"));
+      await tap.onMessage(result("sess-1", "error_max_turns"));
+      await tap.close();
+
+      expect(byKind(sink.records, "decision")).toHaveLength(1);
+      expect(byKind(sink.records, "decision")[0].payload.decisionType).toBe(
+        DECISION_TYPE[decision],
+      );
+      expect(byKind(sink.records, "workflow")).toHaveLength(1);
+      expect(byKind(sink.records, "workflow")[0].payload).toMatchObject({
+        workflowType: WORKFLOW_TYPE[workflow],
+        finishReason: FINISH_REASON[finish],
+      });
+      expect(byKind(sink.records, "tool")).toHaveLength(0);
+      expect(errors).toHaveLength(0);
+    },
+  );
+
   it("remaps log_decision to a DecisionEvent, emitted only on its non-error tool_result", async () => {
     const { tap, sink } = newTap();
     await tap.onMessage(sys("sess-1"));

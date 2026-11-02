@@ -16,7 +16,7 @@
 
 /**
  * Type definitions for O11yService and related o11y integration.
- * Public API types (Connection, BatchingOptions, BatchStatus) are exported for consumers.
+ * Public API types (Connection, BatchingOptions, BatchStatus, MetricsTags) are exported for consumers.
  */
 
 // ---------------------------------------------------------------------------
@@ -52,6 +52,25 @@ export interface Instrumentation {
       };
     },
   ) => void;
+  incrementCounter(
+    operation: string,
+    increment?: number,
+    hasError?: boolean,
+    tags?: MetricsTags,
+  ): void;
+  trackValue(
+    operation: string,
+    value: number,
+    hasError?: boolean,
+    tags?: MetricsTags,
+  ): void;
+  bucketValue(
+    operation: string,
+    value: number,
+    buckets?: number[],
+    hasError?: boolean,
+    tags?: MetricsTags,
+  ): void;
 }
 
 export interface InstrumentedAppMethods {
@@ -104,12 +123,12 @@ export type { Connection } from "@salesforce/core";
 
 /**
  * Opt-in configuration for publishing telemetry to the Falcon service
- * (o11y-processing-service) using API-key authentication.
+ * using API-key authentication.
  *
  * When a valid {@link FalconUploadOptions.apiKey} and a resolvable endpoint are
  * provided to {@link O11yService.initialize}, Falcon becomes the SELECTED upload
- * destination — telemetry publishes to the Falcon endpoint instead of the
- * existing org/static path (this is opt-in publishing, not a simultaneous
+ * destination — telemetry publishes to the Falcon endpoint instead of Core
+ * Connect/static transport (this is opt-in publishing, not a simultaneous
  * dual-write). Omit `falcon` entirely to preserve the existing behavior.
  *
  * The library hardcodes no Falcon URLs: the consumer supplies the pod base host(s)
@@ -216,14 +235,14 @@ export interface InitializeOptions {
    */
   appName?: string;
   /**
-   * Relative path from instance root for dynamic o11y upload.
+   * Relative Core Connect proxy path from instance root for authenticated Core upload.
    * A default is used if omitted. See jsforce doc for request/requestPost (relative path from root).
    */
   dynamicO11yUploadEndpointPath?: string;
   /**
    * Opt-in Falcon publishing. When a valid API key and a resolvable endpoint are
-   * present, telemetry publishes to the selected Falcon endpoint instead of the
-   * existing upload path. Omit to preserve current behavior exactly. See
+   * present, telemetry publishes raw protobuf to the selected Falcon endpoint instead of
+   * Core Connect/static transport. Omit to preserve current behavior exactly. See
    * {@link FalconUploadOptions}.
    */
   falcon?: FalconUploadOptions;
@@ -235,6 +254,12 @@ export interface InitializeOptions {
    */
   headlessCollector?: LocalHeadlessCollector;
 }
+
+/**
+ * Tags for a metric series (see {@link O11yService.incrementCounter}). Each distinct set of tag
+ * values is a separate series, so keep tags low-cardinality.
+ */
+export type MetricsTags = Record<string, string | number | boolean>;
 
 /** Batching configuration options. */
 export interface BatchingOptions {
@@ -253,6 +278,7 @@ export interface BatchingOptions {
 /** Batch status information. */
 export interface BatchStatus {
   hasData: boolean;
+  /** Estimated size of the buffered upload in bytes, including the metrics recorded since the last upload. */
   estimatedByteSize: number;
   thresholdBytes: number;
   isOverThreshold: boolean;

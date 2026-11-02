@@ -1,4 +1,4 @@
-import type { SDKMessage } from "./types"; // R11: local structural mirror, NOT the ESM-only SDK
+import type { SDKMessage } from "./types"; // local structural mirror, NOT the ESM-only SDK
 import { deriveRootId } from "./rootId";
 import {
   finishReasonForResult,
@@ -19,7 +19,7 @@ import type {
 } from "./types";
 
 const WORKFLOW_NAME = "claude-code-session";
-const O11Y_SERVER = "o11y"; // in-process no-op server name; confirmed by Task 0.1
+const O11Y_SERVER = "o11y"; // in-process no-op server name
 
 interface OpenTool {
   startMs: number;
@@ -92,7 +92,7 @@ export function createSpanTap(
   const workflowMeta: Record<string, unknown> = {};
   // Pending o11y calls keyed by tool_use id. A Layer-B span/metadata update is NOT emitted
   // at tool_use time: the SDK validates the tool input during MCP dispatch, which happens
-  // AFTER the stream surfaces the assistant block (reviewer Major "unvalidated attempts"), so
+  // AFTER the stream surfaces the assistant block, so
   // emitting eagerly could produce a phantom event for a call the server later rejects. We
   // stash a prepared (or locally-rejected) record and commit it only on the matching
   // NON-error tool_result; an is_error result drops it and routes to onError.
@@ -121,7 +121,7 @@ export function createSpanTap(
     return typeof v === "string" ? v : undefined;
   };
 
-  let judgmentSeq = 0; // mirrors server.py _judgment_seq: unique ids for repeated events
+  let judgmentSeq = 0; // unique ids for repeated judgment events
 
   // Build a point-in-time judgment SpanRecord (startMs === endMs → duration 0). Pure: no
   // emit. The record is stashed pending and emitted by commitO11y on a non-error tool_result.
@@ -380,8 +380,7 @@ export function createSpanTap(
       if (block.type !== "tool_use") continue;
       const id = String(block.id);
       const name = String(block.name);
-      // The sub-agent spawner is named `Task` by the Agent SDK / standard
-      // Claude Code, but `Agent` by the Bedrock/FleetView CLI build. Both anchor
+      // Sub-agent spawners can be named `Task` or `Agent`. Both anchor
       // an AgentActivity (via parent_tool_use_id) instead of a ToolCallActivity.
       if (name === "Task" || name === "Agent") {
         // block.input is unvalidated `unknown`; only accept a string
