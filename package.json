@@ -38,6 +38,10 @@
   ],
   "author": "Salesforce",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/forcedotcom/o11y-reporter.git"
+  },
   "publishConfig": {
     "access": "public"
   },

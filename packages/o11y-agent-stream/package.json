@@ -3,6 +3,11 @@
   "version": "1.0.0",
   "description": "Layer-A Claude Agent SDK stream parser for @salesforce/o11y-reporter",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/forcedotcom/o11y-reporter.git",
+    "directory": "packages/o11y-agent-stream"
+  },
   "type": "commonjs",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

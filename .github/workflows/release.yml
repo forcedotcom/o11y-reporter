@@ -36,6 +36,34 @@ jobs:
       - name: Upgrade npm for OIDC trusted publishing
         run: npm install -g npm@11.9.0
 
+      # Both packages publish through npm trusted publishing (OIDC), and a
+      # missing or mismatched trusted publisher only shows up at `npm publish`,
+      # after semantic-release has already pushed the tag and GitHub release.
+      # Run the same OIDC token exchange `npm publish` does, for each package
+      # this run could publish, so a bad config stops the run before anything
+      # is tagged. The short-lived token it returns is discarded.
+      - name: Check npm trusted publishing
+        run: |
+          ID_TOKEN=$(curl -sf -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=npm:registry.npmjs.org" | jq -r .value)
+          check() {
+            STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+              -H "Authorization: Bearer $ID_TOKEN" \
+              "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/$1")
+            case "$STATUS" in
+              2??) echo "$1: trusted publishing OK" ;;
+              *)
+                echo "::error::OIDC token exchange for $1 returned HTTP $STATUS. Check its trusted publisher on npmjs.com (forcedotcom/o11y-reporter, release.yml)."
+                exit 1
+                ;;
+            esac
+          }
+          check "@salesforce%2fo11y-reporter"
+          VERSION=$(node -p "require('./packages/o11y-agent-stream/package.json').version")
+          if ! curl -sf -o /dev/null "https://registry.npmjs.org/@salesforce%2fo11y-agent-stream/$VERSION"; then
+            check "@salesforce%2fo11y-agent-stream"
+          fi
+
       - run: yarn install
       - run: yarn format:ci
       - run: yarn eslint:ci
@@ -62,30 +90,25 @@ jobs:
       # Rebuild so dist matches the new version.
       - run: yarn package
         if: steps.release-check.outputs.released == 'true'
+      # Authenticates through npm trusted publishing (OIDC), no token. Because
+      # the repo is public, npm also attaches a provenance attestation, which
+      # it only accepts when package.json `repository.url` matches this repo.
       - name: Publish to npm
         if: steps.release-check.outputs.released == 'true'
         run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # Publish the workspace sub-package. It is versioned on its own: bump the
       # version in packages/o11y-agent-stream/package.json to release it, and it
       # goes out with the next root release. A version that is already on npm is
       # skipped, so a failed publish is retried on the next release.
       #
-      # It carries a `workspace:^` dependency on the root package, so it must
-      # publish via `yarn npm publish`, which rewrites that to `^<root version>`
-      # — plain `npm publish` would ship the literal protocol string and break
-      # installs. The rewrite reads the root version semantic-release just
-      # wrote, which is why this step only runs when the root released.
-      # token auth — yarn 4.1.1 predates OIDC (added in 4.10.0); also bootstraps
-      # the first publish. Unlike the root's `npm publish` above, this step gets
-      # no provenance attestation and depends on NPM_TOKEN staying alive.
-      #
-      # Follow-up for parity with the root (non-blocking, and it removes the
-      # risk of a revoked token breaking this step): bump `packageManager` to
-      # yarn@4.10.0+, register @salesforce/o11y-agent-stream as its own trusted
-      # publisher on npmjs.com, then drop YARN_NPM_AUTH_TOKEN.
+      # It carries a `workspace:^` dependency on the root package. `yarn pack`
+      # rewrites that to `^<root version>` — publishing the directory with npm
+      # would ship the literal protocol string and break installs. The rewrite
+      # reads the root version semantic-release just wrote, which is why this
+      # step only runs when the root released. The tarball is then published
+      # with npm, not `yarn npm publish`, because yarn 4.1.1 predates OIDC
+      # (added in 4.10.0); this way it uses trusted publishing like the root.
       - name: Publish o11y-agent-stream to npm
         if: steps.release-check.outputs.released == 'true'
         run: |
@@ -95,6 +118,5 @@ jobs:
             exit 0
           fi
           yarn workspace @salesforce/o11y-agent-stream build
-          yarn workspace @salesforce/o11y-agent-stream npm publish --access public
-        env:
-          YARN_NPM_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          yarn workspace @salesforce/o11y-agent-stream pack --out "$RUNNER_TEMP/o11y-agent-stream.tgz"
+          npm publish "$RUNNER_TEMP/o11y-agent-stream.tgz" --access public
