@@ -1,13 +1,10 @@
 name: Release o11y-reporter
 on:
-  # Releases are paused while the open-source request is pending. Restore the
-  # `push` trigger below once the open-source release is approved.
-  #
-  # push:
-  #   branches: ["main"]
-  #   paths-ignore:
-  #     - ".gitignore"
-  #     - "CODEOWNERS"
+  push:
+    branches: ["main"]
+    paths-ignore:
+      - ".gitignore"
+      - "CODEOWNERS"
   workflow_dispatch: # Allow manual run from Actions tab
 
 jobs:
