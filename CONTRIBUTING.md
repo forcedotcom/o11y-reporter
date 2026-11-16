@@ -1,6 +1,10 @@
 # Contributing to o11y-reporter
 
-Thank you for your interest in contributing to o11y-reporter! This document provides guidelines and information for developers who want to contribute to this project.
+o11y-reporter does not accept external contributions or pull requests. External
+pull requests will be closed. To report a bug or suggest a feature, use normal
+Salesforce support channels.
+
+Salesforce employees may contribute using this guide.
 
 ## Pre-requisites
 
@@ -8,7 +12,7 @@ Thank you for your interest in contributing to o11y-reporter! This document prov
 2. **Yarn**: This repository uses [Yarn](https://yarnpkg.com/) to manage dependencies. Please install Yarn globally using `npm install --global yarn`.
 3. **Git**: Make sure you have Git installed and configured.
 
-## Development Setupe
+## Development Setup
 
 ### Initial Setup
 
@@ -146,7 +150,7 @@ o11y-reporter/
 └── package.json           # Project configuration
 ```
 
-## Pull Request Process
+## Pull Request Process For Salesforce Employees
 
 1. **Create a feature branch** from `main`
 2. **Make your changes** following the coding standards
@@ -196,5 +200,3 @@ If you have questions or need help:
 ## License
 
 This project is licensed under the Apache License 2.0. See the [LICENSE.txt](LICENSE.txt) file for details.
-
-Thank you for contributing to o11y-reporter!
